@@ -6,6 +6,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <signal.h>
+#include <sys/epoll.h>
 
 
 #define VALID 0
@@ -219,6 +220,7 @@ pid_t test_start(const char *path, int *fd) {
 		fprintf(stderr,"ABORTED can't create pipe\n");
 		exit(1);
     }
+
     child = fork();
     if (child == (pid_t) -1) {
 		fprintf(stderr,"ABORTED can't fork\n");
@@ -251,18 +253,19 @@ int main(int argc, char *argv[]) {
 	int option;
 	char * logfile=NULL;
 	int i;
-	struct testset *currset;
-	struct testset *newset;
-	struct testset *base=NULL;
-	int fd;
+	int *output;
+	struct testset *testarray;
 	pid_t pid;
 	char buffer[BUFSIZ];
-	FILE *output;
-	FILE *log;
 	float pct;
 	int maxlen=0;
 	char format[10];
-	//int replay=0;
+	int testcount=0;
+	int epfd;
+	int nr_events;
+	struct epoll_event * event;
+	struct epoll_event * events;
+	int num;
 
 	while ((option = getopt(argc, argv, "hl:r:")) != EOF) {
 		switch (option) {
@@ -277,68 +280,69 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	for(i=optind;i<argc;i++){
-		newset=x_malloc(sizeof(struct testset));
-		if(base!=NULL){
-			currset->next=newset;
-		}else{
-			base=newset;
-		}
-		newset->state=VALID;
-		newset->passed=0;
-		newset->failed=0;
-		newset->missing=0;
-		newset->todo=0;
-		newset->skip=0;
-		newset->count=-1;
-		newset->current=0;
-		newset->next=NULL;
-		newset->filename=argv[i];
-		currset=newset;
-		if(strlen(newset->filename)>0){
-			maxlen=strlen(newset->filename);
+	testcount=argc-optind;
+	testarray=x_malloc(sizeof(struct testset) *testcount);
+	output=x_malloc(sizeof(int)*testcount);
+	
+
+	for(i=0;i<testcount;i++){
+		testarray[i].state=VALID;
+		testarray[i].passed=0;
+		testarray[i].failed=0;
+		testarray[i].missing=0;
+		testarray[i].todo=0;
+		testarray[i].skip=0;
+		testarray[i].count=-1;
+		testarray[i].current=0;
+		testarray[i].next=NULL;
+		testarray[i].filename=argv[i];
+		if(strlen(testarray[i].filename)>0){
+			maxlen=strlen(testarray[i].filename);
 		}
 	}
 
-	if(logfile){
-		log=fopen(logfile,"w+");
-	}
-	currset=base;
-
-	while(currset != NULL){
-		pid=test_start(currset->filename, &fd);
-		output = fdopen(fd, "r");
-
-		while ((currset->state!=ABORTED) && (currset->state!=SKIPPED) && fgets(buffer, sizeof(buffer), output)) {
-			if(logfile){
-				fprintf(log,"%s",buffer);
-			}
-			parse_line(buffer,currset);
-		}
-		fclose(output);
-
-		if(currset->current < currset->count){
-			currset->missing += currset->count - currset->current;
-		}
-
-		currset=currset->next;
+	epfd=epoll_create(testcount);
+	if(epfd<0){
+		perror("epoll_create");
 	}
 
-	currset=base;
+	for(i=0;i<testcount;i++){
+		pid=test_start(testarray[i].filename, &(output[i]));
+		//output[i] = fdopen(fd, "r");
+		event=x_malloc(sizeof(struct epoll_event));
+		event->data.fd=i;
+		event->events=EPOLLIN | EPOLLHUP;
+		epoll_ctl(epfd,EPOLL_CTL_ADD,output[i], event);
+	}
+
+	events=x_malloc(sizeof(struct epoll_event)*64);
+	puts("prewait\n");
+	nr_events=epoll_wait(epfd,events ,64,-1);
+	puts("postwait\n");
+
+	for(i=0;i<nr_events;i++){
+		printf("i=%d %d\n",i,nr_events);
+		num=read(events[i].data.fd,buffer,sizeof(buffer));	
+		printf("num=%d\n",num);
+		//fgets(buffer, sizeof(buffer), events[i].data.fd);
+		printf("buffer=%s\n",buffer);
+		//parse_line(buffer,testarray[events[i].data.fd]);
+	}	
+
 	//printf("%-20s\tPassed/Failed/Missed (%%)\tSkipped/Todo\tResult\n","testset");
 	sprintf(format,"%%-%ds",maxlen+2);
 	printf(format,"Testset");
 	printf("%-6s/%6s/%6s %8s %-7s %-4s %s\n","Passed","Failed","Missed"," (%%) ","skipped","Todo","Result");
-	while(currset != NULL){
+	for(i=0;i<testcount;i++){
 		//printf("\n%s:\n",currset->filename);
-		//printf("PASS: %d FAIL: %d NOT FOUND: %d\n",currset->passed,currset->failed,currset->missing);
-		//printf("todo: %d skipped: %d \n",currset->todo,currset->skip);
-		printf(format,currset->filename);
-		pct=((float) currset->passed/(currset->passed+currset->failed+currset->missing))*100.0;
-		printf("%5d /%5d /%6d ",currset->passed,currset->failed,currset->missing);
+		//printf("PASS: %d FAIL: %d NOT FOUND: %d\n",testarray[i].passed,testarray[i].failed,testarray[i].missing);
+		//printf("todo: %d skipped: %d \n",testarray[i].todo,testarray[i].skip);
+		printf(format,testarray[i].filename);
+		pct=((float) testarray[i].passed/(testarray[i].passed+testarray[i].failed+testarray[i].missing))*100.0;
+		printf("%5d /%5d /%6d ",testarray[i].passed,testarray[i].failed,testarray[i].missing);
 		printf("%8.1f ",pct);
-		printf("%7d %4d ",currset->skip,currset->todo);
-		switch(currset->state){
+		printf("%7d %4d ",testarray[i].skip,testarray[i].todo);
+		switch(testarray[i].state){
 			case ABORTED:
 				printf("file aborted\n");
 				break;
@@ -352,7 +356,6 @@ int main(int argc, char *argv[]) {
 				printf("success\n");
 				break;
 		}
-		currset=currset->next;
 	}
 	exit(0);
 }
