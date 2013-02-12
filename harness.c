@@ -162,8 +162,10 @@ void * x_malloc(size_t size) {
 	void *p;
 
 	p = malloc(size);
-	if (p == NULL)
+	if (p == NULL){
 		fprintf(stderr,"failed to malloc %lu bytes", (unsigned long) size);
+		exit(100);
+	}
 	return p;
 }
 
@@ -255,7 +257,8 @@ int main(int argc, char *argv[]) {
 	int option;
 	char * logfile=NULL;
 	int i;
-	int *output;
+	//int *output;
+	FILE **output;
 	struct testset *testarray;
 	pid_t pid;
 	char buffer[BUFSIZ];
@@ -264,6 +267,7 @@ int main(int argc, char *argv[]) {
 	char format[10];
 	int testcount=0;
 	int epfd;
+	int fd;
 	int nr_events;
 	struct epoll_event * event;
 	struct epoll_event * events;
@@ -284,7 +288,7 @@ int main(int argc, char *argv[]) {
 
 	testcount=argc-optind;
 	testarray=x_malloc(sizeof(struct testset) *testcount);
-	output=x_malloc(sizeof(int)*testcount);
+	output=x_malloc(sizeof(FILE)*testcount);
 	
 	for(i=0;i<testcount;i++){
 		printf("setting up %s\n",argv[i+optind]);
@@ -307,28 +311,36 @@ int main(int argc, char *argv[]) {
 	if(epfd<0){
 		perror("epoll_create");
 	}
+	events=x_malloc(sizeof(struct epoll_event)*64);
 
 	for(i=0;i<testcount;i++){
-		pid=test_start(testarray[i].filename, &(output[i]));
-		printf("%s: setting %d to %d\n",testarray[i].filename,i,output[i]);
-		//output[i] = fdopen(fd, "r");
+		pid=test_start(testarray[i].filename,&fd);
+		output[i] = fdopen(fd, "r");
+		printf("%s: setting %d\n",testarray[i].filename,i);
 		event=x_malloc(sizeof(struct epoll_event));
 		event->data.fd=i;
 		event->events=EPOLLIN | EPOLLHUP;
-		epoll_ctl(epfd,EPOLL_CTL_ADD,output[i], event);
+		epoll_ctl(epfd,EPOLL_CTL_ADD,fd, event);
 	}
 
-	events=x_malloc(sizeof(struct epoll_event)*64);
-	nr_events=epoll_wait(epfd,events ,64,-1);
 
-	for(i=0;i<nr_events;i++){
-		printf("i=%d %d %d %d\n",i,nr_events,events[i].data.fd,output[events[i].data.fd]); 
-		num=read(output[events[i].data.fd],buffer,sizeof(buffer));	
-		printf("num=%d\n",num);
-		printf("buffer=%s\n",buffer);
-		//parse_line(buffer,testarray[events[i].data.fd]);
-	}	
+	//while(1){
+		nr_events=epoll_wait(epfd,events ,64,-1);
 
+		for(i=0;i<nr_events;i++){
+			printf("i=%d %d %d\n",i,nr_events,events[i].data.fd); 
+			//num=read(output[events[i].data.fd],buffer,sizeof(buffer));	
+			fgets(buffer, sizeof(buffer), output[events[i].data.fd]);
+			
+			//printf("num=%d\n",num);
+			printf("buffer=%s\n",buffer);
+			//parse_line(buffer,testarray[events[i].data.fd]);
+		}	
+	//}
+
+	//**********************
+	//write out the results.
+	//**********************
 	//printf("%-20s\tPassed/Failed/Missed (%%)\tSkipped/Todo\tResult\n","testset");
 	sprintf(format,"%%-%ds",maxlen+2);
 	printf(format,"Testset");
