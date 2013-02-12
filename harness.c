@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <getopt.h>
 #include <stdlib.h>
@@ -322,7 +324,7 @@ int main(int argc, char *argv[]) {
 
 	for(i=0;i<nr_events;i++){
 		printf("i=%d %d\n",i,nr_events);
-		num=read(events[i].data.fd,buffer,sizeof(buffer));	
+		num=read(output[events[i].data.fd],buffer,sizeof(buffer));	
 		printf("num=%d\n",num);
 		//fgets(buffer, sizeof(buffer), events[i].data.fd);
 		printf("buffer=%s\n",buffer);
