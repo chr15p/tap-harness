@@ -286,8 +286,8 @@ int main(int argc, char *argv[]) {
 	testarray=x_malloc(sizeof(struct testset) *testcount);
 	output=x_malloc(sizeof(int)*testcount);
 	
-
 	for(i=0;i<testcount;i++){
+		printf("setting up %s\n",argv[i+optind]);
 		testarray[i].state=VALID;
 		testarray[i].passed=0;
 		testarray[i].failed=0;
@@ -297,7 +297,7 @@ int main(int argc, char *argv[]) {
 		testarray[i].count=-1;
 		testarray[i].current=0;
 		testarray[i].next=NULL;
-		testarray[i].filename=argv[i];
+		testarray[i].filename=argv[i+optind];
 		if(strlen(testarray[i].filename)>0){
 			maxlen=strlen(testarray[i].filename);
 		}
@@ -310,6 +310,7 @@ int main(int argc, char *argv[]) {
 
 	for(i=0;i<testcount;i++){
 		pid=test_start(testarray[i].filename, &(output[i]));
+		printf("%s: setting %d to %d\n",testarray[i].filename,i,output[i]);
 		//output[i] = fdopen(fd, "r");
 		event=x_malloc(sizeof(struct epoll_event));
 		event->data.fd=i;
@@ -318,15 +319,12 @@ int main(int argc, char *argv[]) {
 	}
 
 	events=x_malloc(sizeof(struct epoll_event)*64);
-	puts("prewait\n");
 	nr_events=epoll_wait(epfd,events ,64,-1);
-	puts("postwait\n");
 
 	for(i=0;i<nr_events;i++){
-		printf("i=%d %d\n",i,nr_events);
+		printf("i=%d %d %d %d\n",i,nr_events,events[i].data.fd,output[events[i].data.fd]); 
 		num=read(output[events[i].data.fd],buffer,sizeof(buffer));	
 		printf("num=%d\n",num);
-		//fgets(buffer, sizeof(buffer), events[i].data.fd);
 		printf("buffer=%s\n",buffer);
 		//parse_line(buffer,testarray[events[i].data.fd]);
 	}	
