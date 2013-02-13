@@ -268,7 +268,7 @@ int main(int argc, char *argv[]) {
 	int fd;
 	int nr_events;
 	struct pollfd *pollfd;
-	int j;
+	int remaining;
 
 	while ((option = getopt(argc, argv, "hl:r:")) != EOF) {
 		switch (option) {
@@ -300,11 +300,11 @@ int main(int argc, char *argv[]) {
 		testarray[i].next=NULL;
 		testarray[i].output=NULL;
 		testarray[i].filename=argv[i+optind];
-		if(strlen(testarray[i].filename)>0){
+		if(strlen(testarray[i].filename)>maxlen){
 			maxlen=strlen(testarray[i].filename);
 		}
 	}
-
+printf("maxlen=%d\n##\n",maxlen);
 	//events=x_malloc(sizeof(struct epoll_event)*64);
 	pollfd=x_malloc(sizeof(struct pollfd)*testcount);
 
@@ -317,8 +317,9 @@ int main(int argc, char *argv[]) {
 		pollfd[i].events=POLLIN;
 	}
 
-
-	for(j=0;j<15;j++){
+	remaining=testcount;
+	//for(j=0;j<15;j++){
+	while(remaining >0){
 		nr_events=poll(pollfd,testcount ,-1);
 		if(nr_events ==-1){
 			perror("poll call failed");
@@ -326,19 +327,22 @@ int main(int argc, char *argv[]) {
 		}
 
 		for(i=0;i<testcount;i++){
-			printf("%s i=%d %d %x\n",testarray[i].filename,i,nr_events,pollfd[i].revents); 
-			if(pollfd[i].revents & POLLIN){
+			//printf("%s i=%d %d %x\n",testarray[i].filename,i,nr_events,pollfd[i].revents); 
+			if((pollfd[i].revents & POLLIN) && (testarray[i].state!=SKIPPED)){
 				fgets(buffer, sizeof(buffer), testarray[i].output);
 				if(buffer == NULL){
 					printf("eof for %s\n",testarray[i].filename);
 				}
-				printf("buffer=%s\n",buffer);
+				printf("%s buffer=%s",testarray[i].filename, buffer);
+				parse_line(buffer,&testarray[i]);
 			}			
 			if(pollfd[i].revents & POLLHUP){
 				pollfd[i].fd=-1;
+				remaining--;
 			}
 		}	
 	}
+printf("\n##\n");
 	//**********************
 	//write out the results.
 	//**********************
@@ -351,7 +355,11 @@ int main(int argc, char *argv[]) {
 		//printf("PASS: %d FAIL: %d NOT FOUND: %d\n",testarray[i].passed,testarray[i].failed,testarray[i].missing);
 		//printf("todo: %d skipped: %d \n",testarray[i].todo,testarray[i].skip);
 		printf(format,testarray[i].filename);
-		pct=((float) testarray[i].passed/(testarray[i].passed+testarray[i].failed+testarray[i].missing))*100.0;
+		if((testarray[i].passed+testarray[i].failed+testarray[i].missing)!=0){
+			pct=((float) testarray[i].passed/(testarray[i].passed+testarray[i].failed+testarray[i].missing))*100.0;
+		}else{
+			pct=0;
+		}
 		printf("%5d /%5d /%6d ",testarray[i].passed,testarray[i].failed,testarray[i].missing);
 		printf("%8.1f ",pct);
 		printf("%7d %4d ",testarray[i].skip,testarray[i].todo);
