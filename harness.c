@@ -1,5 +1,3 @@
-#define _GNU_SOURCE
-
 #include <stdio.h>
 #include <getopt.h>
 #include <stdlib.h>
@@ -8,7 +6,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <signal.h>
-#include <sys/epoll.h>
+#include <sys/poll.h>
 
 
 #define VALID 0
@@ -26,6 +24,7 @@ struct testset {
 	int skip;
 	int count;
 	int current;
+	FILE *output;
 	struct testset * next; 
 };
 
@@ -258,7 +257,7 @@ int main(int argc, char *argv[]) {
 	char * logfile=NULL;
 	int i;
 	//int *output;
-	FILE **output;
+	//FILE **output;
 	struct testset *testarray;
 	pid_t pid;
 	char buffer[BUFSIZ];
@@ -266,12 +265,10 @@ int main(int argc, char *argv[]) {
 	int maxlen=0;
 	char format[10];
 	int testcount=0;
-	int epfd;
 	int fd;
 	int nr_events;
-	struct epoll_event * event;
-	struct epoll_event * events;
-	int num;
+	struct pollfd *pollfd;
+	int j;
 
 	while ((option = getopt(argc, argv, "hl:r:")) != EOF) {
 		switch (option) {
@@ -288,7 +285,7 @@ int main(int argc, char *argv[]) {
 
 	testcount=argc-optind;
 	testarray=x_malloc(sizeof(struct testset) *testcount);
-	output=x_malloc(sizeof(FILE)*testcount);
+	//output=x_malloc(sizeof(FILE)*testcount);
 	
 	for(i=0;i<testcount;i++){
 		printf("setting up %s\n",argv[i+optind]);
@@ -301,43 +298,47 @@ int main(int argc, char *argv[]) {
 		testarray[i].count=-1;
 		testarray[i].current=0;
 		testarray[i].next=NULL;
+		testarray[i].output=NULL;
 		testarray[i].filename=argv[i+optind];
 		if(strlen(testarray[i].filename)>0){
 			maxlen=strlen(testarray[i].filename);
 		}
 	}
 
-	epfd=epoll_create(testcount);
-	if(epfd<0){
-		perror("epoll_create");
-	}
-	events=x_malloc(sizeof(struct epoll_event)*64);
+	//events=x_malloc(sizeof(struct epoll_event)*64);
+	pollfd=x_malloc(sizeof(struct pollfd)*testcount);
 
 	for(i=0;i<testcount;i++){
 		pid=test_start(testarray[i].filename,&fd);
-		output[i] = fdopen(fd, "r");
-		printf("%s: setting %d\n",testarray[i].filename,i);
-		event=x_malloc(sizeof(struct epoll_event));
-		event->data.fd=i;
-		event->events=EPOLLIN | EPOLLHUP;
-		epoll_ctl(epfd,EPOLL_CTL_ADD,fd, event);
+		testarray[i].output = fdopen(fd, "r");
+		printf("%s: setting %d to %d\n",testarray[i].filename,i,fd);
+
+		pollfd[i].fd=fd;
+		pollfd[i].events=POLLIN;
 	}
 
 
-	//while(1){
-		nr_events=epoll_wait(epfd,events ,64,-1);
+	for(j=0;j<15;j++){
+		nr_events=poll(pollfd,testcount ,-1);
+		if(nr_events ==-1){
+			perror("poll call failed");
+			exit(99);
+		}
 
-		for(i=0;i<nr_events;i++){
-			printf("i=%d %d %d\n",i,nr_events,events[i].data.fd); 
-			//num=read(output[events[i].data.fd],buffer,sizeof(buffer));	
-			fgets(buffer, sizeof(buffer), output[events[i].data.fd]);
-			
-			//printf("num=%d\n",num);
-			printf("buffer=%s\n",buffer);
-			//parse_line(buffer,testarray[events[i].data.fd]);
+		for(i=0;i<testcount;i++){
+			printf("%s i=%d %d %x\n",testarray[i].filename,i,nr_events,pollfd[i].revents); 
+			if(pollfd[i].revents & POLLIN){
+				fgets(buffer, sizeof(buffer), testarray[i].output);
+				if(buffer == NULL){
+					printf("eof for %s\n",testarray[i].filename);
+				}
+				printf("buffer=%s\n",buffer);
+			}			
+			if(pollfd[i].revents & POLLHUP){
+				pollfd[i].fd=-1;
+			}
 		}	
-	//}
-
+	}
 	//**********************
 	//write out the results.
 	//**********************
