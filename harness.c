@@ -256,8 +256,6 @@ int main(int argc, char *argv[]) {
 	int option;
 	char * logfile=NULL;
 	int i;
-	//int *output;
-	//FILE **output;
 	struct testset *testarray;
 	pid_t pid;
 	char buffer[BUFSIZ];
@@ -269,7 +267,7 @@ int main(int argc, char *argv[]) {
 	int nr_events;
 	struct pollfd *pollfd;
 	int remaining;
-	int runningtest;
+	int nexttest;
 	int concurrent=1;
 	int *mapping;
 
@@ -288,7 +286,9 @@ int main(int argc, char *argv[]) {
 
 	testcount=argc-optind;
 	testarray=x_malloc(sizeof(struct testset) *testcount);
-	//output=x_malloc(sizeof(FILE)*testcount);
+
+	pollfd=x_malloc(sizeof(struct pollfd)*concurrent);
+	mapping=x_malloc(sizeof(int)*concurrent);
 	
 	for(i=0;i<testcount;i++){
 		printf("setting up %s\n",argv[i+optind]);
@@ -307,26 +307,22 @@ int main(int argc, char *argv[]) {
 			maxlen=strlen(testarray[i].filename);
 		}
 	}
-printf("maxlen=%d\n##\n",maxlen);
-	//events=x_malloc(sizeof(struct epoll_event)*64);
-	remaining=testcount;
+
 	if(concurrent==0){
 		concurrent=testcount;
 	}
-	pollfd=x_malloc(sizeof(struct pollfd)*concurrent);
-	mapping=x_malloc(sizeof(int)*concurrent);
 
 	for(i=0;i<concurrent;i++){
 		pid=test_start(testarray[i].filename,&fd);
 		testarray[i].output = fdopen(fd, "r");
-		printf("%s: setting %d to %d\n",testarray[i].filename,i,fd);
 		mapping[i]=i; 			//pollfd i maps to testarray[mapping[i]];
 		pollfd[i].fd=fd;
 		pollfd[i].events=POLLIN;
 	}
 
-	runningtest=concurrent-1;
-	//for(j=0;j<15;j++){
+	remaining=testcount; // number of tests either running or left to run
+	nexttest=concurrent; //index of next test to run
+
 	while(remaining >0){
 		nr_events=poll(pollfd,concurrent ,-1);
 		if(nr_events ==-1){
@@ -335,50 +331,37 @@ printf("maxlen=%d\n##\n",maxlen);
 		}
 
 		for(i=0;i<concurrent;i++){
-			//printf("%s i=%d %d %x\n",testarray[i].filename,i,nr_events,pollfd[i].revents); 
 			if(pollfd[i].revents & POLLIN){
 				while((testarray[mapping[i]].state!=SKIPPED) && fgets(buffer, sizeof(buffer), testarray[mapping[i]].output)){
 					if(buffer == NULL){
 						printf("eof for %s\n",testarray[mapping[i]].filename);
 					}
-					//printf("%s buffer=%s",testarray[mapping[i]].filename, buffer);
 					parse_line(buffer,&testarray[mapping[i]]);
 				}
 			}			
 			if(pollfd[i].revents & POLLHUP){
-				//printf("%s (%d) received POLLHUP\n",testarray[mapping[i]].filename,i);
-				remaining--;  //one less test left to do
 				fclose(testarray[i].output);
-				//close(pollfd[i].fd);	
-				//printf("1test:%s remaining: %d runningtest: %d testcount: %d\n",testarray[mapping[i]].filename,remaining,runningtest,testcount);
-				//printf("2test:%s remaining: %d runningtest: %d testcount: %d\n",testarray[runningtest].filename,remaining,runningtest,testcount);
-				if(runningtest < (testcount-1)){	//if runningtest points to the last test in the array then we're done
-					runningtest++; 			//otherwise start the next process and feed it into the grinder^W poll
-					//printf("runningtest %d\n",runningtest);
-					//printf("starting %s\n",testarray[runningtest].filename);
-					pid=test_start(testarray[runningtest].filename,&fd);
-					testarray[runningtest].output = fdopen(fd, "r");
+
+				remaining--;  //one less test left to do
+				if(nexttest < testcount){	//if nexttest is higher then the actual number of tests were done
+					pid=test_start(testarray[nexttest].filename,&fd); 	//otherwise start the next process and feed it into the grinder^W poll
+					testarray[nexttest].output = fdopen(fd, "r");
 					pollfd[i].fd=fd;
-					mapping[i]=runningtest;
-					//printf("start: %s remaining: %d runningtest: %d fd: %d\n",testarray[runningtest].filename,remaining,runningtest,fd);
+					mapping[i]=nexttest;
+					nexttest++;
 				}else{
-					pollfd[i].fd=-1;
+					pollfd[i].fd=-1; //we've run out of tests so just mark this pollfd structure as not to be watched
 				}
 			}
 		}	
 	}
-printf("\n##\n");
 	//**********************
 	//write out the results.
 	//**********************
-	//printf("%-20s\tPassed/Failed/Missed (%%)\tSkipped/Todo\tResult\n","testset");
 	sprintf(format,"%%-%ds",maxlen+2);
 	printf(format,"Testset");
 	printf("%-6s/%6s/%6s %8s %-7s %-4s %s\n","Passed","Failed","Missed"," (%%) ","skipped","Todo","Result");
 	for(i=0;i<testcount;i++){
-		//printf("\n%s:\n",currset->filename);
-		//printf("PASS: %d FAIL: %d NOT FOUND: %d\n",testarray[i].passed,testarray[i].failed,testarray[i].missing);
-		//printf("todo: %d skipped: %d \n",testarray[i].todo,testarray[i].skip);
 		printf(format,testarray[i].filename);
 		if((testarray[i].passed+testarray[i].failed+testarray[i].missing)!=0){
 			pct=((float) testarray[i].passed/(testarray[i].passed+testarray[i].failed+testarray[i].missing))*100.0;
@@ -403,5 +386,8 @@ printf("\n##\n");
 				break;
 		}
 	}
+	free(pollfd);
+	free(mapping);
+	free(testarray);
 	exit(0);
 }
