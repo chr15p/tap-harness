@@ -270,7 +270,7 @@ int main(int argc, char *argv[]) {
 	struct pollfd *pollfd;
 	int remaining;
 	int runningtest;
-	int concurrent=3;
+	int concurrent=1;
 	int *mapping;
 
 	while ((option = getopt(argc, argv, "hl:r:")) != EOF) {
@@ -325,7 +325,7 @@ printf("maxlen=%d\n##\n",maxlen);
 		pollfd[i].events=POLLIN;
 	}
 
-	runningtest=concurrent;
+	runningtest=concurrent-1;
 	//for(j=0;j<15;j++){
 	while(remaining >0){
 		nr_events=poll(pollfd,concurrent ,-1);
@@ -336,23 +336,26 @@ printf("maxlen=%d\n##\n",maxlen);
 
 		for(i=0;i<concurrent;i++){
 			//printf("%s i=%d %d %x\n",testarray[i].filename,i,nr_events,pollfd[i].revents); 
-			if((pollfd[i].revents & POLLIN) && (testarray[mapping[i]].state!=SKIPPED)){
-				fgets(buffer, sizeof(buffer), testarray[mapping[i]].output);
-				if(buffer == NULL){
-					printf("eof for %s\n",testarray[mapping[i]].filename);
+			if(pollfd[i].revents & POLLIN){
+				while((testarray[mapping[i]].state!=SKIPPED) && fgets(buffer, sizeof(buffer), testarray[mapping[i]].output)){
+					if(buffer == NULL){
+						printf("eof for %s\n",testarray[mapping[i]].filename);
+					}
+					//printf("%s buffer=%s",testarray[mapping[i]].filename, buffer);
+					parse_line(buffer,&testarray[mapping[i]]);
 				}
-				printf("%s buffer=%s",testarray[mapping[i]].filename, buffer);
-				parse_line(buffer,&testarray[mapping[i]]);
 			}			
 			if(pollfd[i].revents & POLLHUP){
-				printf("%s (%d) received POLLHUP\n",testarray[mapping[i]].filename,i);
+				//printf("%s (%d) received POLLHUP\n",testarray[mapping[i]].filename,i);
 				remaining--;  //one less test left to do
-				//fclose(testarray[i].output);
+				fclose(testarray[i].output);
 				//close(pollfd[i].fd);	
-				printf("1test:%s remaining: %d runningtest: %d testcount: %d\n",testarray[mapping[i]].filename,remaining,runningtest,testcount);
+				//printf("1test:%s remaining: %d runningtest: %d testcount: %d\n",testarray[mapping[i]].filename,remaining,runningtest,testcount);
 				//printf("2test:%s remaining: %d runningtest: %d testcount: %d\n",testarray[runningtest].filename,remaining,runningtest,testcount);
-				if(runningtest < testcount){	//if runningtest points to the last test in the array then we're done
+				if(runningtest < (testcount-1)){	//if runningtest points to the last test in the array then we're done
 					runningtest++; 			//otherwise start the next process and feed it into the grinder^W poll
+					//printf("runningtest %d\n",runningtest);
+					//printf("starting %s\n",testarray[runningtest].filename);
 					pid=test_start(testarray[runningtest].filename,&fd);
 					testarray[runningtest].output = fdopen(fd, "r");
 					pollfd[i].fd=fd;
