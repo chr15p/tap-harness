@@ -269,6 +269,9 @@ int main(int argc, char *argv[]) {
 	int nr_events;
 	struct pollfd *pollfd;
 	int remaining;
+	int runningtest;
+	int concurrent=3;
+	int *mapping;
 
 	while ((option = getopt(argc, argv, "hl:r:")) != EOF) {
 		switch (option) {
@@ -306,39 +309,58 @@ int main(int argc, char *argv[]) {
 	}
 printf("maxlen=%d\n##\n",maxlen);
 	//events=x_malloc(sizeof(struct epoll_event)*64);
-	pollfd=x_malloc(sizeof(struct pollfd)*testcount);
+	remaining=testcount;
+	if(concurrent==0){
+		concurrent=testcount;
+	}
+	pollfd=x_malloc(sizeof(struct pollfd)*concurrent);
+	mapping=x_malloc(sizeof(int)*concurrent);
 
-	for(i=0;i<testcount;i++){
+	for(i=0;i<concurrent;i++){
 		pid=test_start(testarray[i].filename,&fd);
 		testarray[i].output = fdopen(fd, "r");
 		printf("%s: setting %d to %d\n",testarray[i].filename,i,fd);
-
+		mapping[i]=i; 			//pollfd i maps to testarray[mapping[i]];
 		pollfd[i].fd=fd;
 		pollfd[i].events=POLLIN;
 	}
 
-	remaining=testcount;
+	runningtest=concurrent;
 	//for(j=0;j<15;j++){
 	while(remaining >0){
-		nr_events=poll(pollfd,testcount ,-1);
+		nr_events=poll(pollfd,concurrent ,-1);
 		if(nr_events ==-1){
 			perror("poll call failed");
 			exit(99);
 		}
 
-		for(i=0;i<testcount;i++){
+		for(i=0;i<concurrent;i++){
 			//printf("%s i=%d %d %x\n",testarray[i].filename,i,nr_events,pollfd[i].revents); 
-			if((pollfd[i].revents & POLLIN) && (testarray[i].state!=SKIPPED)){
-				fgets(buffer, sizeof(buffer), testarray[i].output);
+			if((pollfd[i].revents & POLLIN) && (testarray[mapping[i]].state!=SKIPPED)){
+				fgets(buffer, sizeof(buffer), testarray[mapping[i]].output);
 				if(buffer == NULL){
-					printf("eof for %s\n",testarray[i].filename);
+					printf("eof for %s\n",testarray[mapping[i]].filename);
 				}
-				printf("%s buffer=%s",testarray[i].filename, buffer);
-				parse_line(buffer,&testarray[i]);
+				printf("%s buffer=%s",testarray[mapping[i]].filename, buffer);
+				parse_line(buffer,&testarray[mapping[i]]);
 			}			
 			if(pollfd[i].revents & POLLHUP){
-				pollfd[i].fd=-1;
-				remaining--;
+				printf("%s (%d) received POLLHUP\n",testarray[mapping[i]].filename,i);
+				remaining--;  //one less test left to do
+				//fclose(testarray[i].output);
+				//close(pollfd[i].fd);	
+				printf("1test:%s remaining: %d runningtest: %d testcount: %d\n",testarray[mapping[i]].filename,remaining,runningtest,testcount);
+				//printf("2test:%s remaining: %d runningtest: %d testcount: %d\n",testarray[runningtest].filename,remaining,runningtest,testcount);
+				if(runningtest < testcount){	//if runningtest points to the last test in the array then we're done
+					runningtest++; 			//otherwise start the next process and feed it into the grinder^W poll
+					pid=test_start(testarray[runningtest].filename,&fd);
+					testarray[runningtest].output = fdopen(fd, "r");
+					pollfd[i].fd=fd;
+					mapping[i]=runningtest;
+					//printf("start: %s remaining: %d runningtest: %d fd: %d\n",testarray[runningtest].filename,remaining,runningtest,fd);
+				}else{
+					pollfd[i].fd=-1;
+				}
 			}
 		}	
 	}
