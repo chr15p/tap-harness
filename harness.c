@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <signal.h>
 #include <sys/poll.h>
+#include <math.h>
 
 
 #define VALID 0
@@ -30,14 +31,14 @@ struct testset {
 
 struct syntax {
 	char * string;
-	int (*handler)(int testno,char* description, char * directive ,struct testset *ts);
+	int (*handler)(int testno,char* description, char * directive, char * reason ,struct testset *ts);
 };
 
-int cb_ok(int testno,char* description, char * directive ,struct testset *ts);
-int cb_plan(int testno,char* description, char * directive ,struct testset *ts);
-int cb_notok(int testno,char* description, char * directive ,struct testset *ts);
-int cb_bailout(int testno,char* description, char * directive ,struct testset *ts);
-int cb_skipline(int testno,char* description, char * directive ,struct testset *ts);
+int cb_ok(int testno,char* description, char * directive, char * reason ,struct testset *ts);
+int cb_plan(int testno,char* description, char * directive, char * reason ,struct testset *ts);
+int cb_notok(int testno,char* description, char * directive, char * reason ,struct testset *ts);
+int cb_bailout(int testno,char* description, char * directive, char * reason ,struct testset *ts);
+int cb_skipline(int testno,char* description, char * directive, char * reason ,struct testset *ts);
 
 
 struct syntax callbacks[] = {
@@ -51,6 +52,9 @@ struct syntax callbacks[] = {
 
 
 char * ltrim(char * string){
+	if(string==NULL){
+		return NULL;
+	}
 	while(isspace(*string)){
 		string++;
 	}
@@ -61,12 +65,16 @@ char * ltrim(char * string){
 void rtrim(char * string){
 	int len;
 
+	if(string==NULL){
+		return;
+	}
 	len=strlen(string)-1;
 	while(isspace(*(string+len))&&(len!=0)){
 		len--;
 	}
 	*(string+len+1)=0;
 	
+	return;
 }
 
 
@@ -91,10 +99,10 @@ int valid_testno(int testno,struct testset *ts) {
 }
 
 
-int cb_notok(int testno,char* description, char * directive ,struct testset *ts){
+int cb_notok(int testno,char* description, char * directive, char * reason ,struct testset *ts){
 
 	if(strncmp(directive,"TODO",4)==0){
-		cb_ok(testno, description, directive, ts);
+		cb_ok(testno, description, directive, reason, ts);
 		return 0;
 	} else if(strncmp(directive,"SKIP",4)==0){
 		ts->skip++;	
@@ -109,7 +117,7 @@ int cb_notok(int testno,char* description, char * directive ,struct testset *ts)
 
 
 
-int cb_ok(int testno,char* description, char * directive ,struct testset *ts){
+int cb_ok(int testno,char* description, char * directive, char * reason ,struct testset *ts){
 
 	if(strncmp(directive,"TODO",4)==0){
 		ts->todo++;		
@@ -123,18 +131,18 @@ int cb_ok(int testno,char* description, char * directive ,struct testset *ts){
 }
 
 
-int cb_bailout(int testno,char* description, char * directive ,struct testset *ts){
+int cb_bailout(int testno,char* description, char * directive, char * reason ,struct testset *ts){
 	ts->state=ABORTED;
 	return 0;
 }
 
 
-int cb_skipline(int testno,char* description, char * directive ,struct testset *ts){
+int cb_skipline(int testno,char* description, char * directive, char * reason ,struct testset *ts){
 	return 0;
 }
 
 
-int cb_plan(int testno,char* description, char * directive ,struct testset *ts){
+int cb_plan(int testno,char* description, char * directive, char * reason ,struct testset *ts){
 
 	if(testno < 0){
 		fprintf(stderr,"invalid plan found, marking test set as failed\n");
@@ -169,18 +177,42 @@ void * x_malloc(size_t size) {
 }
 
 
+char * splitstring(char c, char* string) {
+	int offset=0;
+
+	if(string == NULL) {
+		return NULL;
+	}
+
+	string = ltrim(string);
+
+	while((*(string+offset) != c) && (*(string+offset) != '\0')){
+		offset++;
+	}
+
+	if(*(string+offset) == c) {
+		*(string+offset) = 0;
+		rtrim(string+offset+1);
+		return ltrim(string+offset+1);
+	}else{
+		return (string+offset);
+	}
+}
+
+
 int parse_line(char * line, struct testset *ts) {
 	int i=0;
 	int retval;
 	char *content;
 	char * description=NULL;
 	char * directive=NULL;
+	char * reason=NULL;
 	int testno;
-	int offset=0;
 
 	line=ltrim(line);
 	rtrim(line);
 
+	//callbacks[i].string testno description #  directive  reason
 	while(callbacks[i].string != NULL){
 		if(strncmp(line,callbacks[i].string,strlen(callbacks[i].string))==0) {
 			content=line+strlen(callbacks[i].string);
@@ -188,19 +220,13 @@ int parse_line(char * line, struct testset *ts) {
 			if(content == (line+strlen(callbacks[i].string))) {
 				testno=-1;
 			}
-			description=ltrim(content);
-			while((*(description+offset) != '#') && (*(description+offset) !='\0')){
-				offset++;
-			}
-			//everything after a # is potentially a directive
-			//replace the # with a \0 to terminate description
-			*(description+offset)=0;
-			directive=ltrim(description+offset+1);
-			//strip off trailing spaces
-			rtrim(directive);
-			rtrim(description);
+			description = content;
+			directive = splitstring('#',description);
+			reason = splitstring(' ',directive);
+			//printf("directive=%s+\n",directive);
+			//printf("reason=%s+\n",reason);
 
-			retval=(callbacks[i].handler)(testno,description,directive,ts);
+			retval=(callbacks[i].handler)(testno, description, directive, reason, ts);
 			if(retval==1){
 				return 1;
 			}else if(retval==0){
@@ -268,10 +294,10 @@ int main(int argc, char *argv[]) {
 	struct pollfd *pollfd;
 	int remaining;
 	int nexttest;
-	int concurrent=1;
+	int concurrent=10;
 	int *mapping;
 
-	while ((option = getopt(argc, argv, "hl:r:")) != EOF) {
+	while ((option = getopt(argc, argv, "hl:r:c:")) != EOF) {
 		switch (option) {
 		case 'h':
 			exit(0);
@@ -279,11 +305,14 @@ int main(int argc, char *argv[]) {
 		case 'l':
 			logfile = optarg;
 			break;
+		case 'c':
+			concurrent = strtol(optarg,NULL,10);
+			break;
 		default:
 			exit(1);
 		}
 	}
-
+	//printf("concurrent=%d\n",concurrent);
 	testcount=argc-optind;
 	testarray=x_malloc(sizeof(struct testset) *testcount);
 
@@ -308,7 +337,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if(concurrent==0){
+	if((concurrent==0) || (concurrent > testcount)){
 		concurrent=testcount;
 	}
 
@@ -369,7 +398,7 @@ int main(int argc, char *argv[]) {
 			pct=0;
 		}
 		printf("%5d /%5d /%6d ",testarray[i].passed,testarray[i].failed,testarray[i].missing);
-		printf("%8.1f ",pct);
+		printf("%8.0f ",floor(pct));
 		printf("%7d %4d ",testarray[i].skip,testarray[i].todo);
 		switch(testarray[i].state){
 			case ABORTED:
