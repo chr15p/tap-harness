@@ -39,6 +39,7 @@ int cb_plan(int testno,char* description, char * directive, char * reason ,struc
 int cb_notok(int testno,char* description, char * directive, char * reason ,struct testset *ts);
 int cb_bailout(int testno,char* description, char * directive, char * reason ,struct testset *ts);
 int cb_skipline(int testno,char* description, char * directive, char * reason ,struct testset *ts);
+char * splitstring(char c, char* string); 
 
 
 struct syntax callbacks[] = {
@@ -50,6 +51,13 @@ struct syntax callbacks[] = {
 	{NULL			,NULL      		}
 };
 
+
+/*
+struct _directives directives[] = {
+	{"TODO"	}
+	{"SKIP" }
+	{"TAG" }
+}*/
 
 char * ltrim(char * string){
 	if(string==NULL){
@@ -80,6 +88,11 @@ void rtrim(char * string){
 
 int valid_testno(int testno,struct testset *ts) {
 
+	if(testno > ts->count){
+		ts->state=FAILED;
+		fprintf(stderr,"more tests found then identified in plan\n");
+		return testno;
+	}
 	if((testno == -1) || (testno == ts->current+1)) {
 	//its a good test number or no test number given
 		return ts->current+1;
@@ -138,6 +151,13 @@ int cb_bailout(int testno,char* description, char * directive, char * reason ,st
 
 
 int cb_skipline(int testno,char* description, char * directive, char * reason ,struct testset *ts){
+	char * value;
+
+	printf("cb_skipline called %d+%s+%s+%s\n",testno, description, directive, reason);
+	if(strncmp(directive,"TAG",3)==0){
+		printf("tag set to:+%s+\n",reason);
+		value=splitstring('=',reason);
+	}
 	return 0;
 }
 
@@ -150,7 +170,7 @@ int cb_plan(int testno,char* description, char * directive, char * reason ,struc
 		return 0;
 	}
 
-	if(ts->count !=-1){
+	if(ts->count !=-1){//we've alreay seeen a plan
 		ts->state=FAILED;
 		return 0;
 	}
@@ -218,7 +238,7 @@ int parse_line(char * line, struct testset *ts) {
 			content=line+strlen(callbacks[i].string);
 			testno = strtol(content, (char **) &content, 10);
 			if(content == (line+strlen(callbacks[i].string))) {
-				testno=-1;
+				testno = -1;
 			}
 			description = content;
 			directive = splitstring('#',description);
@@ -227,11 +247,11 @@ int parse_line(char * line, struct testset *ts) {
 			//printf("reason=%s+\n",reason);
 
 			retval=(callbacks[i].handler)(testno, description, directive, reason, ts);
-			if(retval==1){
+			if(retval == 1) {
 				return 1;
-			}else if(retval==0){
+			} else if(retval == 0) {
 				return 0;
-			}else{
+			} else {
 				;
 			}
 		}
@@ -279,25 +299,25 @@ pid_t test_start(const char *path, int *fd) {
 
 
 int main(int argc, char *argv[]) {
-	int option;
 	char * logfile=NULL;
-	int i;
+	char format[10];
 	struct testset *testarray;
+	struct pollfd *pollfd;
 	pid_t pid;
 	char buffer[BUFSIZ];
 	float pct;
+	int i;
+	int option;
 	int maxlen=0;
-	char format[10];
 	int testcount=0;
 	int fd;
 	int nr_events;
-	struct pollfd *pollfd;
 	int remaining;
 	int nexttest;
 	int concurrent=10;
 	int *mapping;
 
-	while ((option = getopt(argc, argv, "hl:r:c:")) != EOF) {
+	while ((option = getopt(argc, argv, "hl:c:")) != EOF) {
 		switch (option) {
 		case 'h':
 			exit(0);
@@ -349,6 +369,7 @@ int main(int argc, char *argv[]) {
 		pollfd[i].events=POLLIN;
 	}
 
+
 	remaining=testcount; // number of tests either running or left to run
 	nexttest=concurrent; //index of next test to run
 
@@ -390,7 +411,7 @@ int main(int argc, char *argv[]) {
 	sprintf(format,"%%-%ds",maxlen+2);
 	printf(format,"Testset");
 	printf("%-6s/%6s/%6s %8s %-7s %-4s %s\n","Passed","Failed","Missed"," (%%) ","skipped","Todo","Result");
-	for(i=0;i<testcount;i++){
+	for(i=0 ; i<testcount ; i++){
 		printf(format,testarray[i].filename);
 		if((testarray[i].passed+testarray[i].failed+testarray[i].missing)!=0){
 			pct=((float) testarray[i].passed/(testarray[i].passed+testarray[i].failed+testarray[i].missing))*100.0;
