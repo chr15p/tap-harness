@@ -1,5 +1,6 @@
 CC=gcc
 CFLAGS=-Wall -g 
+LIBS=-lm
 EXE=harness 
 OBJ=harness.o
 
@@ -7,7 +8,7 @@ OBJ=harness.o
 all: harness
 
 harness: $(OBJ)
-	$(CC) $(OBJ) -o $(EXE) $(CFLAGS)
+	$(CC) $(OBJ) -o $(EXE) $(CFLAGS) $(LIBS)
 
 
 .c.o:
