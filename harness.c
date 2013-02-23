@@ -10,35 +10,66 @@
 #include <math.h>
 
 
-#define VALID 0
-#define ABORTED 1
-#define FAILED 2
+#define OK 0
+#define NOTOK 1
+#define ABORTED 2
 #define SKIPPED 3
+#define TODO 4
+#define MISSING 5
 
-struct testset {
-	char * filename;
-	int state;
-	int passed;
-	int failed;
-	int missing;
-	int todo;
-	int skip;
-	int count;
-	int current;
-	FILE *output;
-	struct testset * next; 
+struct test {
+	int number;
+	int result;
+	int directive;
+	char * description;
+	char * reason;
+	struct test *next;
 };
+
+struct data {
+	char * key;
+	char * value;
+	struct data *next;
+};
+
+struct testsuite {
+	FILE * output;		//process file descriptor
+	char * filename;
+	int directive;
+	char * reason;
+	int plannedcount;
+	int testcount;
+	int result;
+	//struct data * currentmetadata;
+	//struct data * metadata;   //description of the tests, component tested, author etc
+	struct test *tests;		//first test run
+	struct test *current;		//test running atm / last test run (so its easy to append without traversing the entire ll
+	struct list *metadata;
+	//struct list *tests;
+	struct testsuite *next;
+};
+
+struct list {
+	struct data * base;
+	struct data * head;
+};
+
+struct list environment;  //description of the machine ip, hardware type etc
+		
+
+/*************************************/
 
 struct syntax {
 	char * string;
-	int (*handler)(int testno,char* description, char * directive, char * reason ,struct testset *ts);
+	int (*handler)(int testno,char* description, char * directive, char * reason ,struct testsuite *ts);
 };
 
-int cb_ok(int testno,char* description, char * directive, char * reason ,struct testset *ts);
-int cb_plan(int testno,char* description, char * directive, char * reason ,struct testset *ts);
-int cb_notok(int testno,char* description, char * directive, char * reason ,struct testset *ts);
-int cb_bailout(int testno,char* description, char * directive, char * reason ,struct testset *ts);
-int cb_skipline(int testno,char* description, char * directive, char * reason ,struct testset *ts);
+int cb_ok(int testno,char* description, char * directive, char * reason ,struct testsuite *ts);
+int cb_plan(int testno,char* description, char * directive, char * reason ,struct testsuite *ts);
+int cb_notok(int testno,char* description, char * directive, char * reason ,struct testsuite *ts);
+int cb_bailout(int testno,char* description, char * directive, char * reason ,struct testsuite *ts);
+int cb_skipline(int testno,char* description, char * directive, char * reason ,struct testsuite *ts);
+
 char * splitstring(char c, char* string); 
 
 
@@ -59,6 +90,9 @@ struct _directives directives[] = {
 	{"TAG" }
 }*/
 
+/***************************************
+ *
+ * *************************************/
 char * ltrim(char * string){
 	if(string==NULL){
 		return NULL;
@@ -70,6 +104,9 @@ char * ltrim(char * string){
 }
 
 
+/***************************************
+ *
+ * *************************************/
 void rtrim(char * string){
 	int len;
 
@@ -86,105 +123,9 @@ void rtrim(char * string){
 }
 
 
-int valid_testno(int testno,struct testset *ts) {
-
-	if(testno > ts->count){
-		ts->state=FAILED;
-		fprintf(stderr,"more tests found then identified in plan\n");
-		return testno;
-	}
-	if((testno == -1) || (testno == ts->current+1)) {
-	//its a good test number or no test number given
-		return ts->current+1;
-	}else if(testno > ts->current+1) {
-		//missed some tests
-		fprintf(stderr,"test numbers dont tie up, expect %d got %d, probably missed %d tests\n",ts->current+1,testno,testno-ts->current-1);
-		ts->missing+=(testno-1-ts->current);
-		ts->state=FAILED;
-		//ts->current=testno;
-		return testno;
-	} else {
-		ts->state=FAILED;
-		//back tracked test numbers
-		fprintf(stderr,"test numbers dont tie up, was expecting %d found %d\n",ts->current,testno);
-		return testno;
-	}
-}
-
-
-int cb_notok(int testno,char* description, char * directive, char * reason ,struct testset *ts){
-
-	if(strncmp(directive,"TODO",4)==0){
-		cb_ok(testno, description, directive, reason, ts);
-		return 0;
-	} else if(strncmp(directive,"SKIP",4)==0){
-		ts->skip++;	
-	}
-	ts->state=FAILED;
-
-	ts->current=valid_testno(testno,ts);
-	ts->failed++;
-
-	return 0;
-}
-
-
-
-int cb_ok(int testno,char* description, char * directive, char * reason ,struct testset *ts){
-
-	if(strncmp(directive,"TODO",4)==0){
-		ts->todo++;		
-	} else if(strncmp(directive,"SKIP",4)==0){
-		ts->skip++;		
-	}
-	ts->current=valid_testno(testno,ts);
-
-	ts->passed++;
-	return 0;
-}
-
-
-int cb_bailout(int testno,char* description, char * directive, char * reason ,struct testset *ts){
-	ts->state=ABORTED;
-	return 0;
-}
-
-
-int cb_skipline(int testno,char* description, char * directive, char * reason ,struct testset *ts){
-	char * value;
-
-	printf("cb_skipline called %d+%s+%s+%s\n",testno, description, directive, reason);
-	if(strncmp(directive,"TAG",3)==0){
-		printf("tag set to:+%s+\n",reason);
-		value=splitstring('=',reason);
-	}
-	return 0;
-}
-
-
-int cb_plan(int testno,char* description, char * directive, char * reason ,struct testset *ts){
-
-	if(testno < 0){
-		fprintf(stderr,"invalid plan found, marking test set as failed\n");
-		ts->state=FAILED;
-		return 0;
-	}
-
-	if(ts->count !=-1){//we've alreay seeen a plan
-		ts->state=FAILED;
-		return 0;
-	}
-	if(testno > 0){
-		ts->count = testno;
-	} else {
-		ts->count=0;
-		ts->state=SKIPPED;
-	}
-
-	return 0;
-}
-
-
+/***************************************
+ *
+ * *************************************/
 void * x_malloc(size_t size) {
 	void *p;
 
@@ -197,6 +138,215 @@ void * x_malloc(size_t size) {
 }
 
 
+/***************************************
+ *
+ * *************************************/
+char * copystring(char * string){
+	char *tmp;
+
+	if(string==NULL){
+		return NULL;
+	}
+	printf("copying +%s+\n",string);
+	tmp=x_malloc(strlen(string)+1);
+	strncpy(tmp,string,strlen(string)+1);
+
+	return tmp;
+}
+
+
+/***************************************
+ *
+ * *************************************/
+void addtest(struct testsuite* ts){
+	struct test *t;
+	
+	t=(struct test*)x_malloc(sizeof(struct test));
+	t->result=-1;
+	t->directive=-1;
+	t->description=NULL;
+	t->reason=NULL;
+	t->next=NULL;
+
+	if(ts->current != NULL){
+		t->number = ts->current->number +1;
+		ts->current->next=t;
+		ts->testcount++;
+	}else{
+		ts->tests=t;
+		t->number = 1; 
+		ts->testcount=1;
+	}
+
+	ts->current = t;
+
+	printf("adding test number %d count=%d\n",ts->tests->number,ts->testcount);
+}
+
+
+/***************************************
+ *
+ * *************************************/
+int validatettestno(int testno,struct testsuite *ts){
+
+	if((testno > -1) && (ts->testcount < testno)){
+		///testno higher then expected
+		while(ts->testcount < testno){
+			addtest(ts);
+			ts->current->result=MISSING;
+		}
+	}else if((testno > -1) && (ts->testcount > testno)){
+		///tesetno lower then expected
+		testno=ts->testcount;
+		//ts->current->reason="invalid test number found";
+		//ts->current->result=NOTOK;
+	}
+
+	if(testno==-1){
+		testno=ts->testcount;
+	}
+	if((ts->plannedcount != -1)&&(testno > ts->plannedcount)) {
+		///testno greater then the plan allows
+		ts->result=NOTOK;
+		ts->reason="more tests then expected in plan";
+	}
+
+	return testno;
+}
+
+
+
+/***************************************
+ *
+ * *************************************/
+int cb_ok(int testno,char* description, char * directive, char * reason ,struct testsuite *ts){
+	int number;
+
+	addtest(ts);
+	number=validatettestno(testno,ts);
+
+	ts->current->result=OK;
+	ts->current->number=number;
+
+	if(strncmp(directive,"TODO",4)==0){
+		ts->current->directive=TODO;
+	} else if(strncmp(directive,"SKIP",4)==0){
+		ts->current->directive=SKIPPED;
+	}
+	ts->current->description=copystring(description);
+	printf("testno=%d reason=%s\n",testno,reason);
+	ts->current->reason=copystring(reason);
+
+	return 0;
+}
+
+
+/***************************************
+ *
+ * *************************************/
+int cb_notok(int testno,char* description, char * directive, char * reason ,struct testsuite *ts){
+	int number;
+
+	addtest(ts);
+	number=validatettestno(testno,ts);
+
+	ts->current->result=NOTOK;
+
+	if(strncmp(directive,"TODO",4)==0){
+		ts->current->directive=TODO;;
+		ts->current->result=OK;
+	} else if(strncmp(directive,"SKIP",4)==0){
+		ts->current->directive=SKIPPED;
+	}
+
+	ts->current->description=copystring(description);
+	printf("testno=%d reason=%s\n",testno,reason);
+	ts->current->reason=copystring(reason);
+
+	return 0;
+}
+
+
+/***************************************
+ *
+ * *************************************/
+int cb_bailout(int testno,char* description, char * directive, char * reason ,struct testsuite *ts){
+
+	ts->result=ABORTED;
+	return 0;
+}
+
+
+/***************************************
+ *
+ * *************************************/
+void adddata(char * string,struct list *ls){
+	struct data *d;
+	
+	d=x_malloc(sizeof(struct data));
+
+	d->value=copystring(splitstring('=',string));
+	d->key=copystring(string);
+	printf("key=%s value=%s\n",d->key,d->value);
+	d->next=NULL;
+
+	if(ls->head != NULL){
+		ls->head->next = d;
+	}else{
+		ls->base = d;
+	}
+	ls->head = d;
+
+	return;	
+}
+
+/***************************************
+ *
+ * *************************************/
+int cb_skipline(int testno,char* description, char * directive, char * reason, struct testsuite *ts){
+
+	if(strncmp(directive,"TAG",3)==0){
+		adddata(reason,ts->metadata);
+	}else if(strncmp(directive,"ENV",3)==0){
+		adddata(reason,&environment);
+	}
+	return 0;
+}
+
+
+/***************************************
+ *
+ * *************************************/
+int cb_plan(int testno,char* description, char * directive, char * reason ,struct testsuite *ts){
+
+	if(testno < 0){
+		ts->result=NOTOK;
+		ts->reason="invalid plan found";
+		return 0;
+	}
+
+	if(ts->testcount !=-1){//we've alreay seeen a plan
+		ts->result=NOTOK;
+		ts->reason="multiple plans found";
+		return 0;
+	}
+
+	if(testno > 0){
+		ts->plannedcount = testno;
+	} else {
+		ts->plannedcount=0;
+		ts->result=SKIPPED;
+		ts->reason=reason;
+	}
+
+	return 0;
+}
+
+
+
+/***************************************
+ *
+ * *************************************/
 char * splitstring(char c, char* string) {
 	int offset=0;
 
@@ -220,7 +370,10 @@ char * splitstring(char c, char* string) {
 }
 
 
-int parse_line(char * line, struct testset *ts) {
+/***************************************
+ *
+ * *************************************/
+int parse_line(char * line, struct testsuite *ts) {
 	int i=0;
 	int retval;
 	char *content;
@@ -261,6 +414,9 @@ int parse_line(char * line, struct testset *ts) {
 }
 
 
+/***************************************
+ *
+ * *************************************/
 pid_t test_start(const char *path, int *fd) {
     int fds[2], errfd;
     pid_t child;
@@ -298,14 +454,17 @@ pid_t test_start(const char *path, int *fd) {
 
 
 
+/***************************************
+ *
+ * *************************************/
 int main(int argc, char *argv[]) {
 	char * logfile=NULL;
-	char format[10];
-	struct testset *testarray;
+	//char format[10];
+	struct testsuite *testarray;
 	struct pollfd *pollfd;
 	pid_t pid;
 	char buffer[BUFSIZ];
-	float pct;
+	//float pct;
 	int i;
 	int option;
 	int maxlen=0;
@@ -316,6 +475,8 @@ int main(int argc, char *argv[]) {
 	int nexttest;
 	int concurrent=10;
 	int *mapping;
+	struct test * curtest;
+	struct data * curmeta;
 
 	while ((option = getopt(argc, argv, "hl:c:")) != EOF) {
 		switch (option) {
@@ -334,41 +495,62 @@ int main(int argc, char *argv[]) {
 	}
 	//printf("concurrent=%d\n",concurrent);
 	testcount=argc-optind;
-	testarray=x_malloc(sizeof(struct testset) *testcount);
+	if((concurrent==0) || (concurrent > testcount)){
+		concurrent=testcount;
+	}
+
+	printf("concurrent=%d testcount=%d\n",concurrent,testcount);
+	testarray=x_malloc(sizeof(struct testsuite) *testcount);
 
 	pollfd=x_malloc(sizeof(struct pollfd)*concurrent);
 	mapping=x_malloc(sizeof(int)*concurrent);
 	
 	for(i=0;i<testcount;i++){
 		printf("setting up %s\n",argv[i+optind]);
-		testarray[i].state=VALID;
-		testarray[i].passed=0;
-		testarray[i].failed=0;
-		testarray[i].missing=0;
-		testarray[i].todo=0;
-		testarray[i].skip=0;
-		testarray[i].count=-1;
-		testarray[i].current=0;
-		testarray[i].next=NULL;
-		testarray[i].output=NULL;
 		testarray[i].filename=argv[i+optind];
+		testarray[i].directive=-1;
+		testarray[i].reason=NULL;
+		testarray[i].plannedcount=-1;
+		testarray[i].testcount=-1;
+		testarray[i].result=-1;
+		//testarray[i].metadata=NULL;
+		testarray[i].tests=NULL;
+		testarray[i].current=NULL;
+		testarray[i].metadata=x_malloc(sizeof(struct list));
+		testarray[i].metadata->base=NULL;
+		testarray[i].metadata->head=NULL;
+		testarray[i].next=NULL;
+
 		if(strlen(testarray[i].filename)>maxlen){
 			maxlen=strlen(testarray[i].filename);
 		}
 	}
 
-	if((concurrent==0) || (concurrent > testcount)){
-		concurrent=testcount;
-	}
+	printf("setup complete\n");
 
 	for(i=0;i<concurrent;i++){
+		printf("starting %s\n",testarray[i].filename);
 		pid=test_start(testarray[i].filename,&fd);
 		testarray[i].output = fdopen(fd, "r");
 		mapping[i]=i; 			//pollfd i maps to testarray[mapping[i]];
 		pollfd[i].fd=fd;
 		pollfd[i].events=POLLIN;
-	}
 
+	}
+	printf("%d tests started\n",concurrent);
+
+/*
+int runtestsuite(struct testsuite *test,struct pollfd *pollfd, int *mapping,int testno){
+	int fd;
+
+	pid=test_start(test.filename,&fd);	 //otherwise start the next process and feed it into the grinder^W poll
+	test.output = fdopen(fd, "r");
+	pollfd[i].fd=fd;
+	pollfd[i].events=POLLIN;
+	mapping[i]=nexttest;
+
+}
+i*/
 
 	remaining=testcount; // number of tests either running or left to run
 	nexttest=concurrent; //index of next test to run
@@ -382,10 +564,13 @@ int main(int argc, char *argv[]) {
 
 		for(i=0;i<concurrent;i++){
 			if(pollfd[i].revents & POLLIN){
-				while((testarray[mapping[i]].state!=SKIPPED) && fgets(buffer, sizeof(buffer), testarray[mapping[i]].output)){
+				while((testarray[mapping[i]].result!=SKIPPED)
+						  && (testarray[mapping[i]].result!=ABORTED)
+						  && fgets(buffer, sizeof(buffer), testarray[mapping[i]].output)){
 					if(buffer == NULL){
 						printf("eof for %s\n",testarray[mapping[i]].filename);
 					}
+					printf("buffer=%s",buffer);
 					parse_line(buffer,&testarray[mapping[i]]);
 				}
 			}			
@@ -408,6 +593,21 @@ int main(int argc, char *argv[]) {
 	//**********************
 	//write out the results.
 	//**********************
+	for(i=0 ; i<testcount ; i++){
+		printf("%s\n",testarray[i].filename);
+		curmeta=testarray[i].metadata->base;
+		while(curmeta!=NULL){
+			printf(" %s=+%s+\n",curmeta->key,curmeta->value);
+			curmeta=curmeta->next;
+		}
+
+		curtest=testarray[i].tests;
+		while(curtest!=NULL){
+			printf(" %d=  %d (%s)  --%s\n",curtest->number,curtest->result,curtest->reason,curtest->description);
+			curtest=curtest->next;
+		}
+	}
+	/*
 	sprintf(format,"%%-%ds",maxlen+2);
 	printf(format,"Testset");
 	printf("%-6s/%6s/%6s %8s %-7s %-4s %s\n","Passed","Failed","Missed"," (%%) ","skipped","Todo","Result");
@@ -436,6 +636,7 @@ int main(int argc, char *argv[]) {
 				break;
 		}
 	}
+	*/
 	free(pollfd);
 	free(mapping);
 	free(testarray);
