@@ -8,6 +8,9 @@
 #include <signal.h>
 #include <sys/poll.h>
 #include <math.h>
+#include <time.h>
+#include <sys/types.h>
+#include <signal.h>
 
 
 #define OK 0
@@ -40,12 +43,9 @@ struct testsuite {
 	int plannedcount;
 	int testcount;
 	int result;
-	//struct data * currentmetadata;
-	//struct data * metadata;   //description of the tests, component tested, author etc
 	struct test *tests;		//first test run
 	struct test *current;		//test running atm / last test run (so its easy to append without traversing the entire ll
 	struct list *metadata;
-	//struct list *tests;
 	struct testsuite *next;
 };
 
@@ -147,7 +147,7 @@ char * copystring(char * string){
 	if(string==NULL){
 		return NULL;
 	}
-	printf("copying +%s+\n",string);
+	//printf("copying +%s+\n",string);
 	tmp=x_malloc(strlen(string)+1);
 	strncpy(tmp,string,strlen(string)+1);
 
@@ -180,7 +180,7 @@ void addtest(struct testsuite* ts){
 
 	ts->current = t;
 
-	printf("adding test number %d count=%d\n",ts->tests->number,ts->testcount);
+	//printf("adding test number %d count=%d\n",ts->tests->number,ts->testcount);
 }
 
 
@@ -234,7 +234,7 @@ int cb_ok(int testno,char* description, char * directive, char * reason ,struct 
 		ts->current->directive=SKIPPED;
 	}
 	ts->current->description=copystring(description);
-	printf("testno=%d reason=%s\n",testno,reason);
+	//printf("testno=%d reason=%s\n",testno,reason);
 	ts->current->reason=copystring(reason);
 
 	return 0;
@@ -260,7 +260,7 @@ int cb_notok(int testno,char* description, char * directive, char * reason ,stru
 	}
 
 	ts->current->description=copystring(description);
-	printf("testno=%d reason=%s\n",testno,reason);
+	//printf("testno=%d reason=%s\n",testno,reason);
 	ts->current->reason=copystring(reason);
 
 	return 0;
@@ -287,7 +287,7 @@ void adddata(char * string,struct list *ls){
 
 	d->value=copystring(splitstring('=',string));
 	d->key=copystring(string);
-	printf("key=%s value=%s\n",d->key,d->value);
+	//printf("key=%s value=%s\n",d->key,d->value);
 	d->next=NULL;
 
 	if(ls->head != NULL){
@@ -462,7 +462,7 @@ int main(int argc, char *argv[]) {
 	//char format[10];
 	struct testsuite *testarray;
 	struct pollfd *pollfd;
-	pid_t pid;
+	pid_t *pidarray;
 	char buffer[BUFSIZ];
 	//float pct;
 	int i;
@@ -477,8 +477,10 @@ int main(int argc, char *argv[]) {
 	int *mapping;
 	struct test * curtest;
 	struct data * curmeta;
+	struct data * env;
+	time_t endtime;
 
-	while ((option = getopt(argc, argv, "hl:c:")) != EOF) {
+	while ((option = getopt(argc, argv, "hl:c:t:")) != EOF) {
 		switch (option) {
 		case 'h':
 			exit(0);
@@ -489,6 +491,9 @@ int main(int argc, char *argv[]) {
 		case 'c':
 			concurrent = strtol(optarg,NULL,10);
 			break;
+		case 't':
+			endtime = time(NULL)+strtol(optarg,NULL,10);
+			break;
 		default:
 			exit(1);
 		}
@@ -498,15 +503,19 @@ int main(int argc, char *argv[]) {
 	if((concurrent==0) || (concurrent > testcount)){
 		concurrent=testcount;
 	}
+	if(endtime == 0){
+		endtime = time(NULL) + 31536000; //if no timeout is given run for a year
+	}
 
-	printf("concurrent=%d testcount=%d\n",concurrent,testcount);
+	//printf("concurrent=%d testcount=%d\n",concurrent,testcount);
 	testarray=x_malloc(sizeof(struct testsuite) *testcount);
 
+	pidarray=x_malloc(sizeof(pid_t)*concurrent);
 	pollfd=x_malloc(sizeof(struct pollfd)*concurrent);
 	mapping=x_malloc(sizeof(int)*concurrent);
 	
 	for(i=0;i<testcount;i++){
-		printf("setting up %s\n",argv[i+optind]);
+		//printf("setting up %s\n",argv[i+optind]);
 		testarray[i].filename=argv[i+optind];
 		testarray[i].directive=-1;
 		testarray[i].reason=NULL;
@@ -526,18 +535,18 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	printf("setup complete\n");
+	//printf("setup complete\n");
 
 	for(i=0;i<concurrent;i++){
-		printf("starting %s\n",testarray[i].filename);
-		pid=test_start(testarray[i].filename,&fd);
+		//printf("starting %s\n",testarray[i].filename);
+		pidarray[i]=test_start(testarray[i].filename,&fd);
 		testarray[i].output = fdopen(fd, "r");
 		mapping[i]=i; 			//pollfd i maps to testarray[mapping[i]];
 		pollfd[i].fd=fd;
 		pollfd[i].events=POLLIN;
 
 	}
-	printf("%d tests started\n",concurrent);
+	//printf("%d tests started\n",concurrent);
 
 /*
 int runtestsuite(struct testsuite *test,struct pollfd *pollfd, int *mapping,int testno){
@@ -552,10 +561,11 @@ int runtestsuite(struct testsuite *test,struct pollfd *pollfd, int *mapping,int 
 }
 i*/
 
-	remaining=testcount; // number of tests either running or left to run
-	nexttest=concurrent; //index of next test to run
+	remaining = testcount; // number of tests either running or left to run
+	nexttest = concurrent; //index of next test to run
 
-	while(remaining >0){
+
+	while((remaining >0) && ( endtime > time(NULL) )){
 		nr_events=poll(pollfd,concurrent ,-1);
 		if(nr_events ==-1){
 			perror("poll call failed");
@@ -570,7 +580,7 @@ i*/
 					if(buffer == NULL){
 						printf("eof for %s\n",testarray[mapping[i]].filename);
 					}
-					printf("buffer=%s",buffer);
+					//printf("buffer=%s",buffer);
 					parse_line(buffer,&testarray[mapping[i]]);
 				}
 			}			
@@ -579,23 +589,42 @@ i*/
 
 				remaining--;  //one less test left to do
 				if(nexttest < testcount){	//if nexttest is higher then the actual number of tests were done
-					pid=test_start(testarray[nexttest].filename,&fd); 	//otherwise start the next process and feed it into the grinder^W poll
+					pidarray[i]=test_start(testarray[nexttest].filename,&fd); 	//otherwise start the next process and feed it into the grinder^W poll
 					testarray[nexttest].output = fdopen(fd, "r");
 					pollfd[i].fd=fd;
 					mapping[i]=nexttest;
 					nexttest++;
 				}else{
+					pidarray[i]=-1;
 					pollfd[i].fd=-1; //we've run out of tests so just mark this pollfd structure as not to be watched
 				}
 			}
 		}	
 	}
+
+	for(i=0;i<concurrent;i++){
+		if(pidarray[i] != -1 ){
+			kill(pidarray[i],SIGABRT);
+		}
+	}
 	//**********************
 	//write out the results.
 	//**********************
+	printf("Tests: ");
 	for(i=0 ; i<testcount ; i++){
-		printf("%s\n",testarray[i].filename);
+		printf("%s, ",testarray[i].filename);
+	}
+	printf("\nEnvironment:\n");
+	env=environment.base;
+	while(env !=NULL){
+		printf(" %s=%s\n",env->key,env->value);
+		env=env->next;
+	}
+	printf("Results:\n");
+	for(i=0 ; i<testcount ; i++){
+		printf("Test: %s\n",testarray[i].filename);
 		curmeta=testarray[i].metadata->base;
+		printf("Metadata:\n");
 		while(curmeta!=NULL){
 			printf(" %s=+%s+\n",curmeta->key,curmeta->value);
 			curmeta=curmeta->next;
