@@ -470,102 +470,39 @@ void createtestsuite(struct testsuite *ts,char * filename){
 
 }
 
-/***************************************
- *
- * *************************************/
-int main(int argc, char *argv[]) {
-	char * logfile=NULL;
-	//char format[10];
-	struct testsuite *testarray;
+void readresultsfile(logfile,testarray){
+
+
+}
+
+//******************************************************************
+void runtests(time_t endtime, int concurrent, int testcount, struct testsuite *testarray){
 	struct pollfd *pollfd;
 	pid_t *pidarray;
 	char buffer[BUFSIZ];
-	//float pct;
 	int i;
-	int option;
-	int testcount=0;
+	int *mapping;
 	int fd;
 	int nr_events;
 	int remaining;
 	int nexttest;
-	int concurrent=10;
-	int *mapping;
-	struct test * curtest;
-	struct data * curmeta;
-	struct data * env;
-	time_t endtime=0;
 
-	while ((option = getopt(argc, argv, "hl:c:t:")) != EOF) {
-		switch (option) {
-		case 'h':
-			exit(0);
-			break;
-		case 'l':
-			logfile = optarg;
-			break;
-		case 'c':
-			concurrent = strtol(optarg,NULL,10);
-			break;
-		case 't':
-			endtime = time(NULL)+strtol(optarg,NULL,10);
-			break;
-		default:
-			exit(1);
-		}
-	}
-	//printf("concurrent=%d\n",concurrent);
-	testcount=argc-optind;
-	if((concurrent==0) || (concurrent > testcount)){
-		concurrent=testcount;
-	}
-	if(endtime == 0){
-		endtime = time(NULL) + 31536000; //if no timeout is given run for a year
-	}
+	pidarray = x_malloc(sizeof(pid_t)*concurrent);
+	pollfd = x_malloc(sizeof(struct pollfd)*concurrent);
+	mapping = x_malloc(sizeof(int)*concurrent);
 
-	//printf("concurrent=%d testcount=%d\n",concurrent,testcount);
-	testarray=x_malloc(sizeof(struct testsuite) *testcount);
-
-	for(i=0;i<testcount;i++){
-		createtestsuite(&testarray[i],argv[i+optind]);
-		
-		/*
- 		//printf("setting up %s\n",argv[i+optind]);
-		testarray[i].filename=argv[i+optind];
-		testarray[i].directive=-1;
-		testarray[i].reason=NULL;
-		testarray[i].plannedcount=-1;
-		testarray[i].testcount=-1;
-		testarray[i].result=-1;
-		//testarray[i].metadata=NULL;
-		testarray[i].tests=NULL;
-		testarray[i].current=NULL;
-		testarray[i].metadata=x_malloc(sizeof(struct list));
-		testarray[i].metadata->base=NULL;
-		testarray[i].metadata->head=NULL;
-		testarray[i].next=NULL;
-		*/
-	}
-
-	//printf("setup complete\n");
-//******************************************************************
-	pidarray=x_malloc(sizeof(pid_t)*concurrent);
-	pollfd=x_malloc(sizeof(struct pollfd)*concurrent);
-	mapping=x_malloc(sizeof(int)*concurrent);
-
-	for(i=0;i<concurrent;i++){
+	for(i=0 ; i<concurrent ; i++){
 		//printf("starting %s\n",testarray[i].filename);
-		pidarray[i]=test_start(testarray[i].filename,&fd);
+		pidarray[i] = test_start(testarray[i].filename,&fd);
 		testarray[i].output = fdopen(fd, "r");
-		mapping[i]=i; 			//pollfd i maps to testarray[mapping[i]];
-		pollfd[i].fd=fd;
-		pollfd[i].events=POLLIN;
-
+		mapping[i] = i; 			//pollfd i maps to testarray[mapping[i]];
+		pollfd[i].fd = fd;
+		pollfd[i].events = POLLIN;
 	}
 
 	remaining = testcount; // number of tests either running or left to run
 	nexttest = concurrent; //index of next test to run
 
-	
 	while((remaining >0) && ( endtime > time(NULL) )){
 		nr_events=poll(pollfd,concurrent ,-1);
 		if(nr_events ==-1){
@@ -610,7 +547,65 @@ int main(int argc, char *argv[]) {
 			kill(pidarray[i],SIGABRT);
 		}
 	}
+	free(pollfd);
+	free(mapping);
+}
 //******************************************************************
+
+/***************************************
+ *
+ * *************************************/
+int main(int argc, char *argv[]) {
+	char * logfile=NULL;
+	struct testsuite *testarray;
+	int i;
+	int option;
+	int testcount=0;
+	int concurrent=10;
+	struct test * curtest;
+	struct data * curmeta;
+	struct data * env;
+	time_t endtime=0;
+
+	while ((option = getopt(argc, argv, "hl:c:t:")) != EOF) {
+		switch (option) {
+		case 'h':
+			exit(0);
+			break;
+		case 'l':
+			logfile = optarg;
+			break;
+		case 'c':
+			concurrent = strtol(optarg,NULL,10);
+			break;
+		case 't':
+			endtime = time(NULL)+strtol(optarg,NULL,10);
+			break;
+		default:
+			exit(1);
+		}
+	}
+	//printf("concurrent=%d\n",concurrent);
+	testcount=argc-optind;
+	if((concurrent==0) || (concurrent > testcount)){
+		concurrent=testcount;
+	}
+	if(endtime == 0){
+		endtime = time(NULL) + 31536000; //if no timeout is given run for a year
+	}
+
+	//printf("concurrent=%d testcount=%d\n",concurrent,testcount);
+	testarray=x_malloc(sizeof(struct testsuite) *testcount);
+
+
+	if(! logfile){
+		for(i=0;i<testcount;i++){
+			createtestsuite(&testarray[i],argv[i+optind]);
+		}
+		runtests(endtime, concurrent, testcount, testarray);
+	}else{
+		readresultsfile(logfile,testarray);		
+	}
 	//**********************
 	//write out the results.
 	//**********************
@@ -670,8 +665,8 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	*/
-	free(pollfd);
-	free(mapping);
+	//free(pollfd);
+	//free(mapping);
 	free(testarray);
 	exit(0);
 }
