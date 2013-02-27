@@ -453,6 +453,22 @@ pid_t test_start(const char *path, int *fd) {
 }
 
 
+void createtestsuite(struct testsuite *ts,char * filename){
+
+	ts->filename=filename;
+	ts->directive=-1;
+	ts->reason=NULL;
+	ts->plannedcount=-1;
+	ts->testcount=-1;
+	ts->result=-1;
+	ts->tests=NULL;
+	ts->current=NULL;
+	ts->metadata=x_malloc(sizeof(struct list));
+	ts->metadata->base=NULL;
+	ts->metadata->head=NULL;
+	ts->next=NULL;
+
+}
 
 /***************************************
  *
@@ -467,7 +483,6 @@ int main(int argc, char *argv[]) {
 	//float pct;
 	int i;
 	int option;
-	int maxlen=0;
 	int testcount=0;
 	int fd;
 	int nr_events;
@@ -510,12 +525,11 @@ int main(int argc, char *argv[]) {
 	//printf("concurrent=%d testcount=%d\n",concurrent,testcount);
 	testarray=x_malloc(sizeof(struct testsuite) *testcount);
 
-	pidarray=x_malloc(sizeof(pid_t)*concurrent);
-	pollfd=x_malloc(sizeof(struct pollfd)*concurrent);
-	mapping=x_malloc(sizeof(int)*concurrent);
-	
 	for(i=0;i<testcount;i++){
-		//printf("setting up %s\n",argv[i+optind]);
+		createtestsuite(&testarray[i],argv[i+optind]);
+		
+		/*
+ 		//printf("setting up %s\n",argv[i+optind]);
 		testarray[i].filename=argv[i+optind];
 		testarray[i].directive=-1;
 		testarray[i].reason=NULL;
@@ -529,13 +543,14 @@ int main(int argc, char *argv[]) {
 		testarray[i].metadata->base=NULL;
 		testarray[i].metadata->head=NULL;
 		testarray[i].next=NULL;
-
-		if(strlen(testarray[i].filename)>maxlen){
-			maxlen=strlen(testarray[i].filename);
-		}
+		*/
 	}
 
 	//printf("setup complete\n");
+//******************************************************************
+	pidarray=x_malloc(sizeof(pid_t)*concurrent);
+	pollfd=x_malloc(sizeof(struct pollfd)*concurrent);
+	mapping=x_malloc(sizeof(int)*concurrent);
 
 	for(i=0;i<concurrent;i++){
 		//printf("starting %s\n",testarray[i].filename);
@@ -546,25 +561,11 @@ int main(int argc, char *argv[]) {
 		pollfd[i].events=POLLIN;
 
 	}
-	//printf("%d tests started\n",concurrent);
-
-/*
-int runtestsuite(struct testsuite *test,struct pollfd *pollfd, int *mapping,int testno){
-	int fd;
-
-	pid=test_start(test.filename,&fd);	 //otherwise start the next process and feed it into the grinder^W poll
-	test.output = fdopen(fd, "r");
-	pollfd[i].fd=fd;
-	pollfd[i].events=POLLIN;
-	mapping[i]=nexttest;
-
-}
-i*/
 
 	remaining = testcount; // number of tests either running or left to run
 	nexttest = concurrent; //index of next test to run
 
-
+	
 	while((remaining >0) && ( endtime > time(NULL) )){
 		nr_events=poll(pollfd,concurrent ,-1);
 		if(nr_events ==-1){
@@ -588,6 +589,7 @@ i*/
 				fclose(testarray[i].output);
 
 				remaining--;  //one less test left to do
+				//printf("remaining %d\n",remaining);
 				if(nexttest < testcount){	//if nexttest is higher then the actual number of tests were done
 					pidarray[i]=test_start(testarray[nexttest].filename,&fd); 	//otherwise start the next process and feed it into the grinder^W poll
 					testarray[nexttest].output = fdopen(fd, "r");
@@ -604,9 +606,11 @@ i*/
 
 	for(i=0;i<concurrent;i++){
 		if(pidarray[i] != -1 ){
+			//printf("killing %d\n",pidarray[i]);
 			kill(pidarray[i],SIGABRT);
 		}
 	}
+//******************************************************************
 	//**********************
 	//write out the results.
 	//**********************
