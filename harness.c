@@ -478,7 +478,7 @@ int main(int argc, char *argv[]) {
 	struct test * curtest;
 	struct data * curmeta;
 	struct data * env;
-	time_t endtime;
+	time_t endtime=0;
 
 	while ((option = getopt(argc, argv, "hl:c:t:")) != EOF) {
 		switch (option) {
