@@ -7,7 +7,7 @@
 #include <ctype.h>
 #include <signal.h>
 #include <sys/poll.h>
-#include <math.h>
+//#include <math.h>
 #include <time.h>
 #include <sys/types.h>
 #include <signal.h>
@@ -19,6 +19,8 @@
 #define SKIPPED 3
 #define TODO 4
 #define MISSING 5
+
+
 
 struct test {
 	int number;
@@ -470,9 +472,29 @@ void createtestsuite(struct testsuite *ts,char * filename){
 
 }
 
-void readresultsfile(logfile,testarray){
+int readresultsfile(char * logfile,struct testsuite *testarray){
+	FILE * log;
+	char buffer[BUFSIZ];
+	int count=0;
+	char *filename;
 
+	log=fopen(logfile,"r");
+	while(fgets(buffer, sizeof(buffer), log)){
+		printf("read %s",buffer);
+		if(strncmp("## FILE:",buffer,8)==0){
+			//its a new file
+			count++;
+			printf("allocating testarray\n");
+			testarray=realloc(testarray,count*sizeof(struct testsuite));
+			filename = copystring(splitstring(':',buffer));
+			createtestsuite(&testarray[count-1], filename);
+		}else{
+			parse_line(buffer,&testarray[count-1]);
+		}
+	}
 
+	fclose(log);
+	return count;
 }
 
 //******************************************************************
@@ -557,7 +579,8 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testsuite *t
  * *************************************/
 int main(int argc, char *argv[]) {
 	char * logfile=NULL;
-	struct testsuite *testarray;
+	int readfileflag=0;
+	struct testsuite *testarray=NULL;
 	int i;
 	int option;
 	int testcount=0;
@@ -566,14 +589,18 @@ int main(int argc, char *argv[]) {
 	struct data * curmeta;
 	struct data * env;
 	time_t endtime=0;
+	FILE *log;
 
-	while ((option = getopt(argc, argv, "hl:c:t:")) != EOF) {
+	while ((option = getopt(argc, argv, "hl:c:t:r")) != EOF) {
 		switch (option) {
 		case 'h':
 			exit(0);
 			break;
 		case 'l':
 			logfile = optarg;
+			break;
+		case 'r':
+			readfileflag = 1;
 			break;
 		case 'c':
 			concurrent = strtol(optarg,NULL,10);
@@ -586,25 +613,28 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	//printf("concurrent=%d\n",concurrent);
-	testcount=argc-optind;
-	if((concurrent==0) || (concurrent > testcount)){
-		concurrent=testcount;
-	}
-	if(endtime == 0){
-		endtime = time(NULL) + 31536000; //if no timeout is given run for a year
-	}
 
 	//printf("concurrent=%d testcount=%d\n",concurrent,testcount);
-	testarray=x_malloc(sizeof(struct testsuite) *testcount);
 
 
-	if(! logfile){
+
+	if(readfileflag == 0){
+		testcount=argc-optind;
+		if((concurrent==0) || (concurrent > testcount)){
+			concurrent=testcount;
+		}
+		if(endtime == 0){
+			endtime = time(NULL) + 31536000; //if no timeout is given run for a year
+		}
+		testarray=x_malloc(sizeof(struct testsuite) *testcount);
 		for(i=0;i<testcount;i++){
 			createtestsuite(&testarray[i],argv[i+optind]);
 		}
 		runtests(endtime, concurrent, testcount, testarray);
 	}else{
-		readresultsfile(logfile,testarray);		
+		for(i=0;i<argc-optind;i++){
+			testcount=readresultsfile(argv[i+optind],testarray);
+		}
 	}
 	//**********************
 	//write out the results.
@@ -620,7 +650,7 @@ int main(int argc, char *argv[]) {
 		env=env->next;
 	}
 	printf("Results:\n");
-	for(i=0 ; i<testcount ; i++){
+	for(i=0; i<testcount; i++){
 		printf("Test: %s\n",testarray[i].filename);
 		curmeta=testarray[i].metadata->base;
 		printf("Metadata:\n");
@@ -633,6 +663,54 @@ int main(int argc, char *argv[]) {
 		while(curtest!=NULL){
 			printf(" %d=  %d (%s)  --%s\n",curtest->number,curtest->result,curtest->reason,curtest->description);
 			curtest=curtest->next;
+		}
+	}
+
+	if(logfile){
+		log=fopen(logfile,"w");
+		env=environment.base;
+		while(env !=NULL){
+			fprintf(log,"## ENV %s=%s\n",env->key,env->value);
+			env=env->next;
+		}
+
+		for(i=0; i<testcount; i++){
+			fprintf(log,"## FILE: %s\n",testarray[i].filename);
+			fprintf(log,"0..%d\n",testarray[i].plannedcount);
+			curmeta=testarray[i].metadata->base;
+			while(curmeta!=NULL){
+				fprintf(log,"## TAG %s=%s\n",curmeta->key,curmeta->value);
+				curmeta=curmeta->next;
+			}
+
+			curtest=testarray[i].tests;
+			while(curtest!=NULL){
+				switch(curtest->result){
+					case OK:
+						fprintf(log,"ok ");
+						break;
+					case NOTOK:
+						fprintf(log,"notok ");
+						break;
+					default:
+						fprintf(log,"unknown ");
+						break;
+				}
+				fprintf(log,"%d %s ",curtest->number,curtest->description);
+				switch(curtest->directive){
+					case SKIPPED:
+						fprintf(log,"# SKIP ");
+						break;
+					case TODO:
+						fprintf(log,"# TODO ");
+						break;
+					default:
+						fprintf(log,"# ");
+						break;
+				}
+				fprintf(log," %s\n",curtest->reason);
+				curtest=curtest->next;
+			}
 		}
 	}
 	/*
