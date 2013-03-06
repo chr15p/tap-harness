@@ -56,6 +56,11 @@ struct list {
 	struct data * head;
 };
 
+struct testgroup {
+	struct testsuite * base;
+	struct testsuite * head;
+};
+
 struct list environment;  //description of the machine ip, hardware type etc
 		
 
@@ -375,7 +380,7 @@ char * splitstring(char c, char* string) {
 /***************************************
  *
  * *************************************/
-int parse_line(char * line, struct testsuite *ts) {
+int parse_line(char * line, struct testgroup *tg) {
 	int i=0;
 	int retval;
 	char *content;
@@ -389,7 +394,9 @@ int parse_line(char * line, struct testsuite *ts) {
 
 	//callbacks[i].string testno description #  directive  reason
 	while(callbacks[i].string != NULL){
+		printf("line=%s\n",line);
 		if(strncmp(line,callbacks[i].string,strlen(callbacks[i].string))==0) {
+		printf("line2=%s\n",line);
 			content=line+strlen(callbacks[i].string);
 			testno = strtol(content, (char **) &content, 10);
 			if(content == (line+strlen(callbacks[i].string))) {
@@ -398,10 +405,10 @@ int parse_line(char * line, struct testsuite *ts) {
 			description = content;
 			directive = splitstring('#',description);
 			reason = splitstring(' ',directive);
-			//printf("directive=%s+\n",directive);
-			//printf("reason=%s+\n",reason);
+			printf("directive=%s+\n",directive);
+			printf("reason=%s+\n",reason);
 
-			retval=(callbacks[i].handler)(testno, description, directive, reason, ts);
+			retval=(callbacks[i].handler)(testno, description, directive, reason, tg->head);
 			if(retval == 1) {
 				return 1;
 			} else if(retval == 0) {
@@ -455,7 +462,10 @@ pid_t test_start(const char *path, int *fd) {
 }
 
 
-void createtestsuite(struct testsuite *ts,char * filename){
+void addtestsuite(char * filename,struct testgroup * tg){
+	struct testsuite *ts;
+
+	ts=x_malloc(sizeof(struct testsuite));
 
 	ts->filename=filename;
 	ts->directive=-1;
@@ -470,9 +480,18 @@ void createtestsuite(struct testsuite *ts,char * filename){
 	ts->metadata->head=NULL;
 	ts->next=NULL;
 
+	if(tg->head != NULL){
+		tg->head->next=ts;
+	}else{
+		tg->base=ts;
+	}
+
+	tg->head=ts;
+
 }
 
-int readresultsfile(char * logfile,struct testsuite *testarray){
+
+int readresultsfile(char * logfile,struct testgroup **tg){
 	FILE * log;
 	char buffer[BUFSIZ];
 	int count=0;
@@ -483,13 +502,10 @@ int readresultsfile(char * logfile,struct testsuite *testarray){
 		printf("read %s",buffer);
 		if(strncmp("## FILE:",buffer,8)==0){
 			//its a new file
-			count++;
-			printf("allocating testarray\n");
-			testarray=realloc(testarray,count*sizeof(struct testsuite));
 			filename = copystring(splitstring(':',buffer));
-			createtestsuite(&testarray[count-1], filename);
+			addtestsuite(filename,*tg);
 		}else{
-			parse_line(buffer,&testarray[count-1]);
+			parse_line(buffer,*tg);
 		}
 	}
 
@@ -497,29 +513,41 @@ int readresultsfile(char * logfile,struct testsuite *testarray){
 	return count;
 }
 
-//******************************************************************
-void runtests(time_t endtime, int concurrent, int testcount, struct testsuite *testarray){
+
+/***************************************
+ *
+ * *************************************/
+
+void runtests(time_t endtime, int concurrent, int testcount, struct testgroup *tg){
 	struct pollfd *pollfd;
 	pid_t *pidarray;
 	char buffer[BUFSIZ];
-	int i;
+	int i=0;
 	int *mapping;
 	int fd;
 	int nr_events;
 	int remaining;
 	int nexttest;
+	struct testsuite *ts;
+
+	if((concurrent==0) || (concurrent > testcount)){
+		concurrent=testcount;
+	}
 
 	pidarray = x_malloc(sizeof(pid_t)*concurrent);
 	pollfd = x_malloc(sizeof(struct pollfd)*concurrent);
 	mapping = x_malloc(sizeof(int)*concurrent);
 
-	for(i=0 ; i<concurrent ; i++){
+	ts=tg->base;
+	while((ts != NULL) && (i < concurrent)){
 		//printf("starting %s\n",testarray[i].filename);
-		pidarray[i] = test_start(testarray[i].filename,&fd);
-		testarray[i].output = fdopen(fd, "r");
+		pidarray[i] = test_start(ts->filename,&fd);
+		ts->output = fdopen(fd, "r");
 		mapping[i] = i; 			//pollfd i maps to testarray[mapping[i]];
 		pollfd[i].fd = fd;
 		pollfd[i].events = POLLIN;
+		i++;
+		ts=ts->next;
 	}
 
 	remaining = testcount; // number of tests either running or left to run
@@ -569,10 +597,11 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testsuite *t
 			kill(pidarray[i],SIGABRT);
 		}
 	}
+	free(pidarray);
 	free(pollfd);
 	free(mapping);
 }
-//******************************************************************
+
 
 /***************************************
  *
@@ -580,7 +609,8 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testsuite *t
 int main(int argc, char *argv[]) {
 	char * logfile=NULL;
 	int readfileflag=0;
-	struct testsuite *testarray=NULL;
+	struct testgroup *tg=NULL;
+	struct testsuite *ts;
 	int i;
 	int option;
 	int testcount=0;
@@ -616,32 +646,30 @@ int main(int argc, char *argv[]) {
 
 	//printf("concurrent=%d testcount=%d\n",concurrent,testcount);
 
-
+	tg=x_malloc(sizeof(struct testgroup));
 
 	if(readfileflag == 0){
 		testcount=argc-optind;
-		if((concurrent==0) || (concurrent > testcount)){
-			concurrent=testcount;
-		}
 		if(endtime == 0){
 			endtime = time(NULL) + 31536000; //if no timeout is given run for a year
 		}
-		testarray=x_malloc(sizeof(struct testsuite) *testcount);
 		for(i=0;i<testcount;i++){
-			createtestsuite(&testarray[i],argv[i+optind]);
+			addtestsuite(argv[i+optind],tg);
 		}
-		runtests(endtime, concurrent, testcount, testarray);
+		//runtests(endtime, concurrent, testcount, &tg);
 	}else{
 		for(i=0;i<argc-optind;i++){
-			testcount=readresultsfile(argv[i+optind],testarray);
+			testcount=readresultsfile(argv[i+optind],&tg);
 		}
 	}
 	//**********************
 	//write out the results.
 	//**********************
 	printf("Tests: ");
-	for(i=0 ; i<testcount ; i++){
-		printf("%s, ",testarray[i].filename);
+	ts=tg->base;
+	while(ts != NULL){
+		printf("%s, ",ts->filename);
+		ts=ts->next;
 	}
 	printf("\nEnvironment:\n");
 	env=environment.base;
@@ -649,21 +677,26 @@ int main(int argc, char *argv[]) {
 		printf(" %s=%s\n",env->key,env->value);
 		env=env->next;
 	}
+
 	printf("Results:\n");
-	for(i=0; i<testcount; i++){
-		printf("Test: %s\n",testarray[i].filename);
-		curmeta=testarray[i].metadata->base;
+	ts=tg->base;
+	while(ts != NULL){
+	//for(i=0; i<testcount; i++){
+		printf("Test: %s\n",ts->filename);
+		curmeta=ts->metadata->base;
 		printf("Metadata:\n");
 		while(curmeta!=NULL){
 			printf(" %s=+%s+\n",curmeta->key,curmeta->value);
 			curmeta=curmeta->next;
 		}
 
-		curtest=testarray[i].tests;
+		curtest=ts->tests;
 		while(curtest!=NULL){
 			printf(" %d=  %d (%s)  --%s\n",curtest->number,curtest->result,curtest->reason,curtest->description);
 			curtest=curtest->next;
 		}
+
+		ts = ts->next;
 	}
 
 	if(logfile){
@@ -674,23 +707,25 @@ int main(int argc, char *argv[]) {
 			env=env->next;
 		}
 
-		for(i=0; i<testcount; i++){
-			fprintf(log,"## FILE: %s\n",testarray[i].filename);
-			fprintf(log,"0..%d\n",testarray[i].plannedcount);
-			curmeta=testarray[i].metadata->base;
+		ts=tg->base;
+		while(ts != NULL){
+		//for(i=0; i<testcount; i++){
+			fprintf(log,"## FILE: %s\n",ts->filename);
+			fprintf(log,"0..%d\n",ts->plannedcount);
+			curmeta=ts->metadata->base;
 			while(curmeta!=NULL){
 				fprintf(log,"## TAG %s=%s\n",curmeta->key,curmeta->value);
 				curmeta=curmeta->next;
 			}
 
-			curtest=testarray[i].tests;
+			curtest=ts->tests;
 			while(curtest!=NULL){
 				switch(curtest->result){
 					case OK:
 						fprintf(log,"ok ");
 						break;
 					case NOTOK:
-						fprintf(log,"notok ");
+						fprintf(log,"not ok ");
 						break;
 					default:
 						fprintf(log,"unknown ");
@@ -745,6 +780,6 @@ int main(int argc, char *argv[]) {
 	*/
 	//free(pollfd);
 	//free(mapping);
-	free(testarray);
+	free(tg);
 	exit(0);
 }
