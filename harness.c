@@ -380,7 +380,7 @@ char * splitstring(char c, char* string) {
 /***************************************
  *
  * *************************************/
-int parse_line(char * line, struct testgroup *tg) {
+int parse_line(char * line, struct testsuite *ts) {
 	int i=0;
 	int retval;
 	char *content;
@@ -394,9 +394,7 @@ int parse_line(char * line, struct testgroup *tg) {
 
 	//callbacks[i].string testno description #  directive  reason
 	while(callbacks[i].string != NULL){
-		printf("line=%s\n",line);
 		if(strncmp(line,callbacks[i].string,strlen(callbacks[i].string))==0) {
-		printf("line2=%s\n",line);
 			content=line+strlen(callbacks[i].string);
 			testno = strtol(content, (char **) &content, 10);
 			if(content == (line+strlen(callbacks[i].string))) {
@@ -405,10 +403,8 @@ int parse_line(char * line, struct testgroup *tg) {
 			description = content;
 			directive = splitstring('#',description);
 			reason = splitstring(' ',directive);
-			printf("directive=%s+\n",directive);
-			printf("reason=%s+\n",reason);
 
-			retval=(callbacks[i].handler)(testno, description, directive, reason, tg->head);
+			retval=(callbacks[i].handler)(testno, description, directive, reason, ts);
 			if(retval == 1) {
 				return 1;
 			} else if(retval == 0) {
@@ -491,7 +487,7 @@ void addtestsuite(char * filename,struct testgroup * tg){
 }
 
 
-int readresultsfile(char * logfile,struct testgroup **tg){
+int readresultsfile(char * logfile,struct testgroup *tg){
 	FILE * log;
 	char buffer[BUFSIZ];
 	int count=0;
@@ -499,13 +495,13 @@ int readresultsfile(char * logfile,struct testgroup **tg){
 
 	log=fopen(logfile,"r");
 	while(fgets(buffer, sizeof(buffer), log)){
-		printf("read %s",buffer);
+		//printf("read %s",buffer);
 		if(strncmp("## FILE:",buffer,8)==0){
 			//its a new file
 			filename = copystring(splitstring(':',buffer));
-			addtestsuite(filename,*tg);
+			addtestsuite(filename,tg);
 		}else{
-			parse_line(buffer,*tg);
+			parse_line(buffer,tg->head);
 		}
 	}
 
@@ -523,38 +519,38 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testgroup *t
 	pid_t *pidarray;
 	char buffer[BUFSIZ];
 	int i=0;
-	int *mapping;
 	int fd;
 	int nr_events;
 	int remaining;
 	int nexttest;
-	struct testsuite *ts;
+	struct testsuite *tscurrent;
+	struct testsuite **worklist;
 
 	if((concurrent==0) || (concurrent > testcount)){
 		concurrent=testcount;
 	}
 
-	pidarray = x_malloc(sizeof(pid_t)*concurrent);
-	pollfd = x_malloc(sizeof(struct pollfd)*concurrent);
-	mapping = x_malloc(sizeof(int)*concurrent);
+	pidarray = x_malloc( sizeof(pid_t) * concurrent);
+	pollfd = x_malloc( sizeof(struct pollfd) * concurrent);
+	worklist = x_malloc( sizeof(void *) * concurrent);
 
-	ts=tg->base;
-	while((ts != NULL) && (i < concurrent)){
+	tscurrent=tg->base;
+	while((tscurrent != NULL) && (i < concurrent)){
 		//printf("starting %s\n",testarray[i].filename);
-		pidarray[i] = test_start(ts->filename,&fd);
-		ts->output = fdopen(fd, "r");
-		mapping[i] = i; 			//pollfd i maps to testarray[mapping[i]];
+		pidarray[i] = test_start(tscurrent->filename,&fd);
+		tscurrent->output = fdopen(fd, "r");
+		worklist[i] = tscurrent;
 		pollfd[i].fd = fd;
 		pollfd[i].events = POLLIN;
 		i++;
-		ts=ts->next;
+		tscurrent = tscurrent->next;
 	}
 
 	remaining = testcount; // number of tests either running or left to run
 	nexttest = concurrent; //index of next test to run
 
-	while((remaining >0) && ( endtime > time(NULL) )){
-		nr_events=poll(pollfd,concurrent ,-1);
+	while((remaining > 0) && ( endtime > time(NULL) )){
+		nr_events = poll(pollfd,concurrent ,-1);
 		if(nr_events ==-1){
 			perror("poll call failed");
 			exit(99);
@@ -562,31 +558,30 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testgroup *t
 
 		for(i=0;i<concurrent;i++){
 			if(pollfd[i].revents & POLLIN){
-				while((testarray[mapping[i]].result!=SKIPPED)
-						  && (testarray[mapping[i]].result!=ABORTED)
-						  && fgets(buffer, sizeof(buffer), testarray[mapping[i]].output)){
+				while( (worklist[i]->result != SKIPPED)
+						  && (worklist[i]->result != ABORTED)
+						  && fgets(buffer, sizeof(buffer), worklist[i]->output) ){
 					if(buffer == NULL){
-						printf("eof for %s\n",testarray[mapping[i]].filename);
+						printf("eof for %s\n",worklist[i]->filename);
 					}
 					//printf("buffer=%s",buffer);
-					parse_line(buffer,&testarray[mapping[i]]);
+					parse_line(buffer,worklist[i]);
 				}
 			}			
 			if(pollfd[i].revents & POLLHUP){
-				fclose(testarray[i].output);
+				fclose( worklist[i]->output );
 
-				remaining--;  //one less test left to do
-				//printf("remaining %d\n",remaining);
-				if(nexttest < testcount){	//if nexttest is higher then the actual number of tests were done
-					pidarray[i]=test_start(testarray[nexttest].filename,&fd); 	//otherwise start the next process and feed it into the grinder^W poll
-					testarray[nexttest].output = fdopen(fd, "r");
-					pollfd[i].fd=fd;
-					mapping[i]=nexttest;
-					nexttest++;
-				}else{
-					pidarray[i]=-1;
-					pollfd[i].fd=-1; //we've run out of tests so just mark this pollfd structure as not to be watched
+				if(tscurrent != NULL ){
+					worklist[i] = tscurrent;
+					pidarray[i] = test_start(worklist[i]->filename,&fd); 	//otherwise start the next process and feed it into the grinder^W poll
+					worklist[i]->output = fdopen(fd, "r");
+					pollfd[i].fd = fd;
+					tscurrent = tscurrent->next;
+				} else {
+					pidarray[i] = -1;
+					pollfd[i].fd = -1; //we've run out of tests so just mark this pollfd structure as not to be watched
 				}
+				remaining--;
 			}
 		}	
 	}
@@ -599,7 +594,7 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testgroup *t
 	}
 	free(pidarray);
 	free(pollfd);
-	free(mapping);
+	free(worklist);
 }
 
 
@@ -642,44 +637,41 @@ int main(int argc, char *argv[]) {
 			exit(1);
 		}
 	}
-	//printf("concurrent=%d\n",concurrent);
 
-	//printf("concurrent=%d testcount=%d\n",concurrent,testcount);
-
-	tg=x_malloc(sizeof(struct testgroup));
+	tg = x_malloc(sizeof(struct testgroup));
 
 	if(readfileflag == 0){
-		testcount=argc-optind;
+		testcount = argc-optind;
 		if(endtime == 0){
 			endtime = time(NULL) + 31536000; //if no timeout is given run for a year
 		}
-		for(i=0;i<testcount;i++){
+		for(i = 0; i < testcount; i++){
 			addtestsuite(argv[i+optind],tg);
 		}
-		//runtests(endtime, concurrent, testcount, &tg);
+		runtests(endtime, concurrent, testcount, tg);
 	}else{
-		for(i=0;i<argc-optind;i++){
-			testcount=readresultsfile(argv[i+optind],&tg);
+		for(i = 0; i < argc-optind; i++){
+			testcount = readresultsfile(argv[i+optind],tg);
 		}
 	}
 	//**********************
 	//write out the results.
 	//**********************
 	printf("Tests: ");
-	ts=tg->base;
+	ts = tg->base;
 	while(ts != NULL){
 		printf("%s, ",ts->filename);
-		ts=ts->next;
+		ts = ts->next;
 	}
 	printf("\nEnvironment:\n");
 	env=environment.base;
-	while(env !=NULL){
+	while(env != NULL){
 		printf(" %s=%s\n",env->key,env->value);
-		env=env->next;
+		env = env->next;
 	}
 
 	printf("Results:\n");
-	ts=tg->base;
+	ts = tg->base;
 	while(ts != NULL){
 	//for(i=0; i<testcount; i++){
 		printf("Test: %s\n",ts->filename);
