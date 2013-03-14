@@ -61,6 +61,11 @@ struct testgroup {
 	struct testsuite * head;
 };
 
+struct output {
+	void (*base)(struct list *env,struct testgroup *tg);
+	void (*head)(struct list *env,struct testgroup *tg);
+};
+
 struct list environment;  //description of the machine ip, hardware type etc
 		
 
@@ -601,6 +606,94 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testgroup *t
 /***************************************
  *
  * *************************************/
+void write_to_log(struct list *environment,struct testgroup *tg,void *data){
+	FILE *log;
+	struct data * env;
+	struct testsuite *ts;
+	struct test * curtest;
+	struct data * curmeta;
+
+
+	log=fopen((char*)data,"w");
+	env=environment->base;
+	while(env !=NULL){
+		fprintf(log,"## ENV %s=%s\n",env->key,env->value);
+		env=env->next;
+	}
+
+	ts=tg->base;
+	while(ts != NULL){
+		fprintf(log,"## FILE: %s\n",ts->filename);
+		fprintf(log,"0..%d\n",ts->plannedcount);
+		curmeta=ts->metadata->base;
+		while(curmeta!=NULL){
+			fprintf(log,"## TAG %s=%s\n",curmeta->key,curmeta->value);
+			curmeta=curmeta->next;
+		}
+
+		curtest=ts->tests;
+		while(curtest!=NULL){
+			switch(curtest->result){
+				case OK:
+					fprintf(log,"ok ");
+					break;
+				case NOTOK:
+					fprintf(log,"not ok ");
+					break;
+				default:
+					fprintf(log,"unknown ");
+					break;
+			}
+			fprintf(log,"%d %s ",curtest->number,curtest->description);
+			switch(curtest->directive){
+				case SKIPPED:
+					fprintf(log,"# SKIP ");
+					break;
+				case TODO:
+					fprintf(log,"# TODO ");
+					break;
+				default:
+					fprintf(log,"# ");
+					break;
+			}
+			fprintf(log," %s\n",curtest->reason);
+			curtest=curtest->next;
+		}
+	}
+	fclose(log);
+}
+
+/***************************************
+ *
+ * *************************************/
+void write_to_stdout(struct list *environment,struct testgroup *tg,void *data){
+	struct testsuite *ts;
+	struct data * curmeta;
+	struct test * curtest;
+
+	ts = tg->base;
+	while(ts != NULL){
+		printf("Test: %s\n",ts->filename);
+		curmeta=ts->metadata->base;
+		printf("Metadata:\n");
+		while(curmeta!=NULL){
+			printf(" %s=+%s+\n",curmeta->key,curmeta->value);
+			curmeta=curmeta->next;
+		}
+
+		curtest=ts->tests;
+		while(curtest!=NULL){
+			printf(" %d=  %d (%s)  --%s\n",curtest->number,curtest->result,curtest->reason,curtest->description);
+			curtest=curtest->next;
+		}
+
+		ts = ts->next;
+	}
+}
+
+/***************************************
+ *
+ * *************************************/
 int main(int argc, char *argv[]) {
 	char * logfile=NULL;
 	int readfileflag=0;
@@ -610,11 +703,11 @@ int main(int argc, char *argv[]) {
 	int option;
 	int testcount=0;
 	int concurrent=10;
-	struct test * curtest;
-	struct data * curmeta;
+	//struct test * curtest;
+	//struct data * curmeta;
 	struct data * env;
 	time_t endtime=0;
-	FILE *log;
+	//FILE *log;
 
 	while ((option = getopt(argc, argv, "hl:c:t:r")) != EOF) {
 		switch (option) {
@@ -671,75 +764,11 @@ int main(int argc, char *argv[]) {
 	}
 
 	printf("Results:\n");
-	ts = tg->base;
-	while(ts != NULL){
-	//for(i=0; i<testcount; i++){
-		printf("Test: %s\n",ts->filename);
-		curmeta=ts->metadata->base;
-		printf("Metadata:\n");
-		while(curmeta!=NULL){
-			printf(" %s=+%s+\n",curmeta->key,curmeta->value);
-			curmeta=curmeta->next;
-		}
-
-		curtest=ts->tests;
-		while(curtest!=NULL){
-			printf(" %d=  %d (%s)  --%s\n",curtest->number,curtest->result,curtest->reason,curtest->description);
-			curtest=curtest->next;
-		}
-
-		ts = ts->next;
-	}
-
+	write_to_stdout(&environment,tg,NULL);
 	if(logfile){
-		log=fopen(logfile,"w");
-		env=environment.base;
-		while(env !=NULL){
-			fprintf(log,"## ENV %s=%s\n",env->key,env->value);
-			env=env->next;
-		}
-
-		ts=tg->base;
-		while(ts != NULL){
-		//for(i=0; i<testcount; i++){
-			fprintf(log,"## FILE: %s\n",ts->filename);
-			fprintf(log,"0..%d\n",ts->plannedcount);
-			curmeta=ts->metadata->base;
-			while(curmeta!=NULL){
-				fprintf(log,"## TAG %s=%s\n",curmeta->key,curmeta->value);
-				curmeta=curmeta->next;
-			}
-
-			curtest=ts->tests;
-			while(curtest!=NULL){
-				switch(curtest->result){
-					case OK:
-						fprintf(log,"ok ");
-						break;
-					case NOTOK:
-						fprintf(log,"not ok ");
-						break;
-					default:
-						fprintf(log,"unknown ");
-						break;
-				}
-				fprintf(log,"%d %s ",curtest->number,curtest->description);
-				switch(curtest->directive){
-					case SKIPPED:
-						fprintf(log,"# SKIP ");
-						break;
-					case TODO:
-						fprintf(log,"# TODO ");
-						break;
-					default:
-						fprintf(log,"# ");
-						break;
-				}
-				fprintf(log," %s\n",curtest->reason);
-				curtest=curtest->next;
-			}
-		}
+		write_to_log(&environment,tg,logfile);
 	}
+
 	/*
 	sprintf(format,"%%-%ds",maxlen+2);
 	printf(format,"Testset");
