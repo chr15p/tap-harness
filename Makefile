@@ -1,19 +1,27 @@
 CC=gcc
-CFLAGS=-Wall -g 
-LIBS=-lm
+CFLAGS=-Wall -g -rdynamic 
+LIBS=-lm -ldl
 EXE=harness 
-OBJ=harness.o
+OBJS=harness.o
+
+DYNOBJS=stdout.so 
+
+all: $(EXE) $(DYNOBJS) 
+
+$(DYNOBJS):
+	gcc -g -Wall -shared -c -fPIC $(basename $@).c -o $(basename $@).o
+	gcc -g -Wall -shared -o $@ $(basename $@).o
 
 
-all: harness
-
-harness: $(OBJ)
-	$(CC) $(OBJ) -o $(EXE) $(CFLAGS) $(LIBS)
+harness: $(OBJS) 
+	$(CC) $(OBJS) -o $(EXE) $(CFLAGS) $(LIBS)
 
 
-.c.o:
+#.c.o:
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< 
 
 clean:
-	-rm $(OBJ)
+	-rm $(OBJS)
 	-rm $(EXE)
+	-rm $(DYNOBJS)

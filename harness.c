@@ -7,20 +7,19 @@
 #include <ctype.h>
 #include <signal.h>
 #include <sys/poll.h>
-//#include <math.h>
 #include <time.h>
 #include <sys/types.h>
 #include <signal.h>
 
+#include "harness.h"
 
+/*
 #define OK 0
 #define NOTOK 1
 #define ABORTED 2
 #define SKIPPED 3
 #define TODO 4
 #define MISSING 5
-
-
 
 struct test {
 	int number;
@@ -65,6 +64,7 @@ struct output {
 	void (*base)(struct list *env,struct testgroup *tg);
 	void (*head)(struct list *env,struct testgroup *tg);
 };
+*/
 
 struct list environment;  //description of the machine ip, hardware type etc
 		
@@ -261,6 +261,7 @@ int cb_notok(int testno,char* description, char * directive, char * reason ,stru
 
 	addtest(ts);
 	number=validatettestno(testno,ts);
+	ts->current->number=number;
 
 	ts->current->result=NOTOK;
 
