@@ -1,0 +1,3 @@
+tap-harness is a test harness for running TAP (test anything protocol) tests.
+
+It is designed to run multiple tests in parallel by forking multiple processes.
