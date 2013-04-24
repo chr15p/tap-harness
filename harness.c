@@ -674,6 +674,7 @@ void write_to_log(struct list *environment,struct testgroup *tg,void *data){
 			fprintf(log," %s\n",curtest->reason);
 			curtest=curtest->next;
 		}
+		ts=ts->next;
 	}
 	fclose(log);
 }
