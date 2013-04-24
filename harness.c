@@ -723,6 +723,8 @@ int main(int argc, char *argv[]) {
 	struct data * env;
 	time_t endtime=0;
 	//FILE *log;
+	int resultcount[6];
+	struct test *t;
 
 	while ((option = getopt(argc, argv, "hl:c:t:r")) != EOF) {
 		switch (option) {
@@ -782,6 +784,40 @@ int main(int argc, char *argv[]) {
 	write_to_stdout(&environment,tg,NULL);
 	if(logfile){
 		write_to_log(&environment,tg,logfile);
+	}
+
+
+	printf("%15s %7s %7s %7s %7s %7s %7s %9s\n","Suite","Passed","Failed","Aborted","Skipped","Todo","Missing","Result");
+	ts = tg->base;
+	while(ts != NULL){
+		for(i=0;i<6;i++){
+			resultcount[i]=0;
+		}
+		printf("%15s ",ts->filename);
+		t = ts->tests;
+		while(t != NULL){
+			resultcount[t->result]++;
+			t=t->next;
+		}
+		for(i=0;i<6;i++){
+			printf("%7d ",resultcount[i]);
+		}
+		switch(ts->result){
+			case ABORTED:
+				printf("%9s","Aborted");
+				break;
+			case SKIPPED:
+				printf("%9s","Skipped");
+				break;
+			case NOTOK:
+				printf("%9s","Failed");
+				break;
+			default:
+				printf("%9s","Success");
+				break;
+		}
+		printf("\n");
+		ts = ts->next;
 	}
 
 	/*
