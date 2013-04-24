@@ -542,7 +542,7 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testgroup *t
 	int fd;
 	int nr_events;
 	int remaining;
-	int nexttest;
+	//int nexttest;
 	struct testsuite *tscurrent;
 	struct testsuite **worklist;
 
@@ -567,7 +567,7 @@ void runtests(time_t endtime, int concurrent, int testcount, struct testgroup *t
 	}
 
 	remaining = testcount; // number of tests either running or left to run
-	nexttest = concurrent; //index of next test to run
+	//nexttest = concurrent; //index of next test to run
 
 	while((remaining > 0) && ( endtime > time(NULL) )){
 		nr_events = poll(pollfd,concurrent ,-1);
@@ -702,7 +702,6 @@ void write_to_stdout(struct list *environment,struct testgroup *tg,void *data){
 			printf(" %d=  %d (%s)  --%s\n",curtest->number,curtest->result,curtest->reason,curtest->description);
 			curtest=curtest->next;
 		}
-
 		ts = ts->next;
 	}
 }
